@@ -2,7 +2,7 @@
 
 ## 0.4.2 — 2026-11-08
 
-Initial public beta for WoW: Forever 1.60.1.
+Initial public release for WoW: Forever 1.60.1.
 
 - Click healing on Blizzard party and raid frames, with class presets and per-character rebinding.
 - Mouse buttons 1–5 and Shift, Ctrl and Alt modifier combinations.

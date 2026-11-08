@@ -4,7 +4,7 @@ Click healing for **World of Warcraft: Forever**, using Blizzard's own party and
 
 Start with ready-made class bindings, change them in `/ahb`, and see which missing buff your next left click will cast. No replacement unit frames or library dependencies.
 
-**Supported client:** Forever 1.60.1, interface 16001. This is an early public beta; the druid setup has received in-game testing. Other class presets are included but need further playtesting.
+**Supported client:** Forever 1.60.1, interface 16001. The druid setup has received in-game testing. Other class presets are included but need further playtesting.
 
 ## Install
 
