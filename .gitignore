@@ -1,0 +1,19 @@
+# Credentials, local settings and game data
+.env
+.env.*
+WTF/
+SavedVariables/
+*.bak
+*.log
+
+# Generated files and local publishing materials
+node_modules/
+dist/
+artifacts/
+publishing/
+curseforge/
+*.zip
+.local/
+.codex/
+.DS_Store
+Thumbs.db

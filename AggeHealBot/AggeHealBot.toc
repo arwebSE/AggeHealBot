@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: AggeHealBot
+## Notes: Simple click healing on Blizzard party and raid frames.
+## Author: Agge
+## Version: 0.4.2
+## SavedVariablesPerCharacter: AggeHealBotDB
+
+Defaults.lua
+Indicators.lua
+Core.lua
+Options.lua
