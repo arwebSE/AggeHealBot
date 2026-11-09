@@ -1,14 +1,24 @@
 # AggeHealBot
 
-Click healing for **World of Warcraft: Forever**, using Blizzard's own party and raid frames.
+Click-cast healing for **World of Warcraft: Forever**, using Blizzard's own party and raid frames.
+
+**[Install from CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [Download ZIP](https://github.com/arwebSE/AggeHealBot/releases) · [Report a bug](https://github.com/arwebSE/AggeHealBot/issues)
 
 Start with ready-made class bindings, change them in `/ahb`, and see which missing buff your next left click will cast. No replacement unit frames or library dependencies.
 
 **Supported client:** Forever 1.60.1, interface 16001. The druid setup has received in-game testing. Other class presets are included but need further playtesting.
 
+## See it in game
+
+<img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="Missing-buff reminder on Blizzard party frames in WoW Forever">
+
+[View the in-game screenshots and binding editor](https://www.curseforge.com/wow/addons/aggehealbot/gallery).
+
 ## Install
 
-1. Download the latest `AggeHealBot` ZIP from [Releases](https://github.com/arwebSE/AggeHealBot/releases).
+Install through the [CurseForge app or project page](https://www.curseforge.com/wow/addons/aggehealbot), selecting **WoW Forever**. For a manual installation:
+
+1. Download the addon ZIP from CurseForge or [GitHub Releases](https://github.com/arwebSE/AggeHealBot/releases).
 2. Extract the `AggeHealBot` folder into `_forever_/Interface/AddOns/`.
 3. Enable the addon and reload the UI. Restart the client if it does not discover the newly installed folder.
 4. Type `/ahb` or open **Options → AddOns → AggeHealBot** to review or change your bindings. Both use the same editor.
@@ -97,6 +107,10 @@ git push origin v0.4.6
 ```
 
 The `CF_API_TOKEN` GitHub Actions secret is used only by the tagged release workflow.
+
+## More from ARWeb
+
+[AggeMinimap](https://www.curseforge.com/wow/addons/aggeminimap) adds a clean square minimap with a compact header and adjustable size and spacing for WoW Forever.
 
 ## License and attribution
 
