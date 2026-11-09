@@ -1,47 +1,29 @@
 # AggeHealBot
 
-**Click your party frames. Cast your heals. Keep the Blizzard UI you know.**
+**[Download on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest)
 
-AggeHealBot adds **click-to-heal bindings to Blizzard party and raid frames in WoW Forever**. Start with class presets, choose your own spells and mouse modifiers, and see which missing buff your next click will cast.
+Click-to-heal on Blizzard party and raid frames in **WoW Forever**.
 
-**[Get AggeHealBot on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [Latest GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest)
+<img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 
-<img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder beside Blizzard party frames in WoW Forever">
+- Custom mouse bindings with Shift, Ctrl and Alt.
+- Class presets for druid, priest, paladin, shaman and mage.
+- Missing-buff reminders outside combat.
 
-[See the gameplay screenshots and binding editor](https://www.curseforge.com/wow/addons/aggehealbot/gallery).
+Type **`/ahb`** or open **Options → AddOns → AggeHealBot** for settings.
 
-## Familiar frames. Your healing bindings.
+For **Forever 1.60.1**. Every cast requires a click.
 
-- **Heal directly from the frame.** Click a friendly party or raid member to cast on them. Use regular Blizzard party frames or raid-style party frames.
-- **Start with class presets.** Defaults are included for druid, priest, paladin, shaman and mage. Review and customize them in `/ahb`.
-- **Make each click yours.** Bind mouse buttons 1–5 with Shift, Ctrl, Alt or combinations. Find learned spells with search and Heals, Buffs and Utility filters.
-- **See missing buffs at a glance.** Outside combat, an icon and animated outline show the buff your next plain left click will cast. Once buffed, that click returns to its healing spell.
+**Auto Self Cast:** The addon disables this WoW setting, including for action-bar spells. It stays off after disabling the addon; restore it in WoW settings if needed.
 
-No replacement unit frames or external libraries. Bindings are saved per character. Every cast requires your click.
+[Report an issue](https://github.com/arwebSE/AggeHealBot/issues) · [AggeMinimap](https://www.curseforge.com/wow/addons/aggeminimap)
 
-## Start healing
+<details>
+<summary>Manual installation</summary>
 
-1. Install **AggeHealBot** for **WoW Forever** from CurseForge.
-2. Type **`/ahb`**, or open **Options → AddOns → AggeHealBot**, and review your bindings.
-3. Click a friendly party or raid frame to cast on that player.
+Extract the addon ZIP into your Forever client's `Interface/AddOns` folder. The path should be `Interface/AddOns/AggeHealBot/AggeHealBot.toc`. Restart the game after first installation.
 
-For druids, the starting healing bindings are **Left: Regrowth**, **Right: Healing Touch**, and **Middle: Rejuvenation**. Change them in the editor to suit your playstyle.
-
-Want compact party frames? Enable **Use Raid-Style Party Frames** in WoW's settings. Missing-buff priority can be switched off in settings or with **`/ahb buffs off`**. During combat, your normal healing bindings apply.
-
-## Compatibility and casting settings
-
-For **WoW Forever 1.60.1, interface 16001**. Binding edits made during combat apply after combat ends. Avoid assigning overlapping click-cast bindings through Blizzard or another addon on the same frames.
-
-**Auto Self Cast:** AggeHealBot turns off this game-wide WoW setting to prevent failed targeted spells from redirecting to you. This also affects action-bar spells and remains off after the addon is unloaded. You can restore it in WoW's settings after disabling AggeHealBot.
-
-Prefer a manual install? Download the addon ZIP from [GitHub Releases](https://github.com/arwebSE/AggeHealBot/releases/latest) and extract `AggeHealBot` into your Forever client's `Interface/AddOns` folder. The resulting path should be `Interface/AddOns/AggeHealBot/AggeHealBot.toc`. Restart after first installation and enable the addon.
-
-## Useful in your next group?
-
-[Get AggeHealBot on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot), favorite it to find it again, or share the link with another healer. [Report a bug or suggest a feature](https://github.com/arwebSE/AggeHealBot/issues) with your class, client build, addon version and binding.
-
-**Want a cleaner minimap too?** [AggeMinimap](https://www.curseforge.com/wow/addons/aggeminimap) adds a square map, a compact header and just two settings for WoW Forever.
+</details>
 
 <details>
 <summary>Full binding reference, buff behavior and development</summary>
