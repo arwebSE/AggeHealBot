@@ -1,0 +1,13 @@
+package-as: AggeHealBot
+
+move-folders:
+    AggeHealBot/AggeHealBot: AggeHealBot
+
+ignore:
+    - README.md
+    - CHANGELOG.md
+    - tests
+
+manual-changelog:
+    filename: CHANGELOG.md
+    markup-type: markdown
