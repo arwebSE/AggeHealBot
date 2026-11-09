@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 — 2026-11-09
+
+- Remove the mage utility preset and Arcane Intellect buff reminders; advertised presets now focus on druid, priest, paladin and shaman healers.
+- Fix repeated secret-number errors in the player-frame buff glow by using native anchors instead of calculating with restricted screen coordinates.
+- Preserve the last valid glow layout if portrait dimensions become restricted.
+- Position the player-frame buff icon just outside the visible panel's top-right corner instead of the stock frame's padded bounds.
+- Add a Shift + left-click menu shortcut on the player portrait when portrait support is enabled, with a tooltip hint while holding Shift.
+- Keep portrait, party and raid binding information and the portrait Shift shortcut hint in an addon-owned tooltip so Blizzard's unit-tooltip refreshes cannot overwrite or fade them.
+
 ## 1.0.0 — 2026-11-09
 
 - Show the next-buff icon and colored animated outline on the player portrait when portrait click-healing is enabled.

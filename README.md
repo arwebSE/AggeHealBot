@@ -7,7 +7,7 @@ Click-to-heal on Blizzard party and raid frames in **WoW Forever**.
 <img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 
 - Custom mouse bindings with Shift, Ctrl and Alt.
-- Class presets for druid, priest, paladin, shaman and mage.
+- Healing presets for druid, priest, paladin and shaman.
 - Missing-buff reminders outside combat.
 
 Type **`/ahb`** or open **Options → AddOns → AggeHealBot** for settings.
@@ -52,7 +52,6 @@ Missing-buff priority is **on by default**. It applies only outside combat and o
 
 - Druid: Mark of the Wild, then Thorns. Gift of the Wild satisfies Mark.
 - Priest: Fortitude, Divine Spirit and Shadow Protection, when learned. Their group versions satisfy the corresponding buff.
-- Mage: Arcane Intellect; Arcane Brilliance also satisfies it.
 
 Once the unit has its buffs, left click returns to its assigned spell. The buff icon and outline disappear when buffs are complete, combat begins, a modifier is held or buff priority is turned off. Unreachable buff targets are blocked instead of falling through to another spell.
 

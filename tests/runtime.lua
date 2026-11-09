@@ -1,6 +1,6 @@
 -- Run with a Lua 5.1+ interpreter, from the repository root.
 local combat, auras, drivers, callbacks = false, {}, {}, {}
-local ns, events = {}, nil
+local ns, events, coreEvents = {}, nil, nil
 local messages, originalPrint = {}, print
 function print(message) messages[#messages + 1] = tostring(message); originalPrint(message) end
 function GetAddOnMetadata(_, field)
@@ -92,21 +92,27 @@ C_UnitAuras = {GetAuraDataByIndex = function(unit, i) return auras[unit] and aur
 SlashCmdList, UISpecialFrames = {}, {}
 PlayerFrame = CreateFrame("Button", "PlayerFrame")
 PlayerFrame:SetAttribute("unit", "player")
-local function event(e, ...) events.scripts.OnEvent(events, e, ...) end
-local function mouseEdge(frame, button, down)
+local function event(e, ...)
+    local target = coreEvents or events
+    target.scripts.OnEvent(target, e, ...)
+end
+local function mouseEdge(frame, button, down, prefix)
     local wanted = down and "AnyDown" or "AnyUp"
     local registered = false
     for _, edge in ipairs(frame.clicks or {}) do if edge == wanted then registered = true end end
     if not registered then return end
-    local suffix = button:match("^Button(%d+)$")
-    if suffix and frame.attrs["type" .. suffix] == "click" then
-        local delegate = frame.attrs["clickbutton" .. suffix]
+    local suffix = button == "LeftButton" and "1" or button:match("^Button(%d+)$")
+    prefix = prefix or ""
+    if suffix and frame.attrs[prefix .. "type" .. suffix] == "click" then
+        local delegate = frame.attrs[prefix .. "clickbutton" .. suffix]
         delegate.scripts.OnClick(delegate, button)
     end
 end
 assert(loadfile("AggeHealBot/Defaults.lua"))("AggeHealBot", ns)
+assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and buff reminders are not supported")
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
+coreEvents = events
 event("ADDON_LOADED", "AggeHealBot")
 event("PLAYER_LOGIN")
 assert(ns.version == GetAddOnMetadata("AggeHealBot", "Version"))
@@ -397,6 +403,14 @@ CreateFrame = function(kind, name, parent, template)
         f.PortraitContainer = CreateFrame("Frame")
         f.Bg = Region()
     end
+    if template == "GameTooltipTemplate" then
+        function f:SetFrameLevel() end
+        function f:SetOwner(owner) self.owner, self.lines = owner, {} end
+        function f:IsOwned(owner) return self.owner == owner end
+        function f:SetText(text) self.lines = {text} end
+        function f:AddLine(text) self.lines[#self.lines + 1] = text end
+        function f:AddDoubleLine(left, right) self.lines[#self.lines + 1] = left .. right end
+    end
     return f
 end
 NineSliceUtil = {ApplyLayoutByName = function(frame, layout) frame.layout = layout end}
@@ -486,3 +500,98 @@ local escapeEntries = 0
 for _, name in ipairs(UISpecialFrames) do if name == "AggeHealBotSettings" then escapeEntries = escapeEntries + 1 end end
 assert(escapeEntries == 1, "standalone Escape entry is not duplicated")
 print("PASS: inline UI, search/selection, category filters, passive removal, spell priority, raid controls optional/default visible")
+
+ns.SetOption("playerFrame", true)
+assert(ns.SaveBinding("shift-", 1, "spell", "Regrowth"))
+assert(PlayerFrame.attrs["shift-type1"] == "click" and PlayerFrame.attrs["shift-clickbutton1"] == ns.settingsButton)
+assert(PlayerFrame.attrs["shift-macrotext1"] == nil, "portrait menu shortcut must not also cast a heal")
+assert(CompactRaidFrame1.attrs["shift-type1"] == "macro", "party/raid Shift-left spell must remain unchanged")
+if AggeHealBotSettings.shown then ns.ToggleOptions() end
+mouseEdge(PlayerFrame, "LeftButton", true, "shift-")
+assert(AggeHealBotSettings.shown, "Shift-left opens the portrait settings menu")
+mouseEdge(PlayerFrame, "LeftButton", false, "shift-")
+assert(AggeHealBotSettings.shown, "mouse release must leave the menu open")
+combat = true
+mouseEdge(PlayerFrame, "LeftButton", true, "shift-")
+assert(not AggeHealBotSettings.shown, "preinstalled portrait shortcut works in combat")
+combat = false
+
+local shiftHeld, ctrlHeld = true, false
+IsShiftKeyDown = function() return shiftHeld end
+IsControlKeyDown = function() return ctrlHeld end
+IsAltKeyDown = function() return false end
+IsModifierKeyDown = function() return shiftHeld or ctrlHeld end
+GameTooltip = {lines = {}}
+function GameTooltip:SetOwner(owner) self.owner, self.lines = owner, {} end
+function GameTooltip:IsOwned(owner) return self.owner == owner end
+function GameTooltip:SetUnit(unit) self.lines = {unit} end
+function GameTooltip:SetText(text) self.lines = {text} end
+function GameTooltip:AddLine(text) self.lines[#self.lines + 1] = text end
+function GameTooltip:AddDoubleLine(left, right) self.lines[#self.lines + 1] = left .. right end
+function GameTooltip:Show() self.shown = true end
+function GameTooltip:Hide() self.shown = false end
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+local shortcutTooltip = AggeHealBotTooltip
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.")
+-- Simulate the stock unit tooltip being rebuilt/faded by Blizzard after hover.
+GameTooltip:SetUnit("player")
+GameTooltip:Hide()
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.", "Blizzard tooltip refresh must not erase or fade the shortcut hint")
+shiftHeld = false
+event("MODIFIER_STATE_CHANGED")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and shortcutTooltip.lines[2] ~= "Shift + Left Click to open AggeHealBot Menu.", "releasing Shift must show the full persistent binding tooltip")
+local normalTooltipLines = #shortcutTooltip.lines
+GameTooltip:SetOwner(PlayerFrame, "ANCHOR_RIGHT")
+GameTooltip:SetUnit("player")
+GameTooltip:Hide()
+assert(shortcutTooltip.shown and #shortcutTooltip.lines == normalTooltipLines, "stock tooltip updates must not erase the normal portrait binding tooltip")
+shiftHeld = true
+event("MODIFIER_STATE_CHANGED")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines == 2 and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.", "holding Shift during hover must update the tooltip without duplicate lines")
+ctrlHeld = true
+event("MODIFIER_STATE_CHANGED")
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] ~= "Shift + Left Click to open AggeHealBot Menu.", "Ctrl-Shift must show the normal persistent tooltip")
+ctrlHeld = false
+ns.SetOption("playerFrame", false)
+assert(PlayerFrame.attrs["shift-type1"] == nil and PlayerFrame.attrs["shift-clickbutton1"] == nil)
+assert(not GameTooltip.shown, "disabling portrait support must remove the hint")
+assert(not shortcutTooltip.shown, "disabling portrait support must hide the dedicated hint")
+ns.SetOption("playerFrame", true)
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+PlayerFrame.scripts.OnLeave(PlayerFrame)
+assert(not GameTooltip.shown, "leaving the portrait hides its tooltip")
+assert(not shortcutTooltip.shown, "leaving the portrait must hide the dedicated hint")
+event("MODIFIER_STATE_CHANGED")
+assert(not GameTooltip.shown, "modifier changes after leaving must not reopen the tooltip")
+assert(not shortcutTooltip.shown, "modifier changes after leaving must not reopen the dedicated hint")
+print("PASS: portrait-only Shift-left menu toggles once, works in combat, restores on disable, and shows a live modifier tooltip")
+
+local normalParty = CreateFrame("Button", "PartyMemberFrame1")
+normalParty:SetAttribute("unit", "party1")
+callbacks.SecureUnitButton_OnLoad(normalParty)
+UnitName = function(unit) return "Member " .. unit end
+shiftHeld = false
+for _, frame in ipairs({normalParty, CompactRaidFrame1}) do
+    GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+    frame.scripts.OnEnter(frame)
+    assert(AggeHealBotTooltip.shown and AggeHealBotTooltip:IsOwned(frame), "party/raid hover must own the persistent tooltip")
+    local count = #AggeHealBotTooltip.lines
+    assert(count > 2 and AggeHealBotTooltip.lines[2] == "Member " .. frame:GetAttribute("unit"), "persistent tooltip identifies the hovered member and includes bindings")
+    GameTooltip:SetUnit(frame:GetAttribute("unit"))
+    GameTooltip:Hide()
+    assert(AggeHealBotTooltip.shown and #AggeHealBotTooltip.lines == count, "stock refresh must not erase party/raid binding information")
+    event("UNIT_AURA", frame:GetAttribute("unit"))
+    assert(AggeHealBotTooltip.shown and #AggeHealBotTooltip.lines == count, "aura refresh must update the tooltip without duplicated rows")
+    shiftHeld = true
+    event("MODIFIER_STATE_CHANGED")
+    assert(#AggeHealBotTooltip.lines > 2, "party/raid Shift-hover must not show the portrait-only menu hint")
+    shiftHeld = false
+    frame.scripts.OnLeave(frame)
+    assert(not AggeHealBotTooltip.shown, "party/raid tooltip must hide on leave")
+end
+normalParty.scripts.OnEnter(normalParty)
+CompactRaidFrame1.scripts.OnEnter(CompactRaidFrame1)
+normalParty.scripts.OnLeave(normalParty)
+assert(AggeHealBotTooltip.shown and AggeHealBotTooltip:IsOwned(CompactRaidFrame1), "late leave from previous frame must not hide the new member's tooltip")
+CompactRaidFrame1.scripts.OnLeave(CompactRaidFrame1)
+print("PASS: regular party and raid hover tooltips survive stock refreshes and aura updates, identify their member, and hide on leave")

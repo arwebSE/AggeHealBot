@@ -8,6 +8,7 @@ local spellDetails = {}
 local openUnitMenu, openUnitMenuUnit
 local raidControlsHiddenByUs = false
 local rejectedBuffs, pendingBuffAttempt = {}, nil
+local hoveredFrame, addonTooltip
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
 local function EnsureExplicitTargeting()
@@ -225,6 +226,52 @@ local function MenuButton(frame)
     end
     return state.menuButton
 end
+local function ShowFrameTooltip(frame)
+    local state = frames[frame]
+    if not state or not GameTooltip then return end
+    local portrait = frame == PlayerFrame and AggeHealBotDB.playerFrame
+    -- Use an addon-owned tooltip for every supported unit frame. SetUnit would
+    -- enable automatic unit-data refreshes that can replace custom lines.
+    if not addonTooltip then
+        addonTooltip = CreateFrame("GameTooltip", "AggeHealBotTooltip", UIParent, "GameTooltipTemplate")
+        addonTooltip:SetFrameStrata("TOOLTIP")
+        addonTooltip:SetFrameLevel(100)
+        addonTooltip:EnableMouse(false)
+    end
+    if GameTooltip:IsOwned(frame) then
+        GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+        GameTooltip:Hide()
+    end
+    local tooltip = addonTooltip
+    tooltip:SetOwner(frame, "ANCHOR_RIGHT")
+    local shiftOnly = IsShiftKeyDown and IsShiftKeyDown()
+        and not (IsControlKeyDown and IsControlKeyDown())
+        and not (IsAltKeyDown and IsAltKeyDown())
+    if portrait and shiftOnly then
+        tooltip:SetText("AggeHealBot", 0.5, 1, 0.7)
+        tooltip:AddLine("Shift + Left Click to open AggeHealBot Menu.", 1, 1, 1)
+        tooltip:Show()
+        return
+    end
+    local unit = Unit(frame)
+    tooltip:SetText("AggeHealBot", 0.5, 1, 0.7)
+    local name = unit and UnitName and UnitName(unit)
+    if not secret(name) and type(name) == "string" then tooltip:AddLine(name, 1, 1, 1) end
+    if not InCombatLockdown() and state.nextBuff then
+        tooltip:AddLine("Next left click: " .. state.nextBuff, 0.65, 1, 0.65)
+    elseif not InCombatLockdown() and state.blockedBuff then
+        tooltip:AddLine(state.blockedBuff .. ": out of range / unavailable", 1, 0.4, 0.3)
+        tooltip:AddLine("Left click blocked until this unit is in range.", 1, 0.7, 0.4)
+    end
+    for _, b in ipairs(bindings) do
+        if b.prefix == "" then
+            local value = b.spell or b.expected or A.actionLabels[b.action] or b.action
+            if b.button == 1 and not InCombatLockdown() then value = state.nextBuff or value end
+            tooltip:AddDoubleLine(b.label, value .. (b.action == "spell" and not b.spell and " (not learned)" or ""), 1, 1, 1, 0.6, 0.9, 0.7)
+        end
+    end
+    tooltip:Show()
+end
 local function Apply(frame)
     if not ready or InCombatLockdown() then return end
     if not frames[frame] then
@@ -251,32 +298,13 @@ local function Apply(frame)
         end)
         frame:HookScript("OnEnter", function(self)
             if not frames[self] then return end
+            hoveredFrame = self
             if not InCombatLockdown() then Apply(self) end
-            if not GameTooltip then return end
-            if not GameTooltip:IsOwned(self) then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                local unit = Unit(self)
-                if unit then GameTooltip:SetUnit(unit) end
-            end
-            GameTooltip:AddLine("AggeHealBot", 0.5, 1, 0.7)
-            if not InCombatLockdown() and frames[self].nextBuff then
-                GameTooltip:AddLine("Next left click: " .. frames[self].nextBuff, 0.65, 1, 0.65)
-            elseif not InCombatLockdown() and frames[self].blockedBuff then
-                GameTooltip:AddLine(frames[self].blockedBuff .. ": out of range / unavailable", 1, 0.4, 0.3)
-                GameTooltip:AddLine("Left click blocked until this unit is in range.", 1, 0.7, 0.4)
-            end
-            for _, b in ipairs(bindings) do
-                if b.prefix == "" then
-                local value = b.spell or b.expected or A.actionLabels[b.action] or b.action
-                if b.button == 1 and not InCombatLockdown() then
-                    value = frames[self].nextBuff or value
-                end
-                GameTooltip:AddDoubleLine(b.label, value .. (b.action == "spell" and not b.spell and " (not learned)" or ""), 1, 1, 1, 0.6, 0.9, 0.7)
-                end
-            end
-            GameTooltip:Show()
+            ShowFrameTooltip(self)
         end)
         frame:HookScript("OnLeave", function(self)
+            if hoveredFrame == self then hoveredFrame = nil end
+            if addonTooltip and addonTooltip:IsOwned(self) then addonTooltip:Hide() end
             if frames[self] and GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
         end)
     end
@@ -286,20 +314,24 @@ local function Apply(frame)
     Set(frame, "checkselfcast", false)
     Set(frame, "checkfocuscast", false)
     for _, b in ipairs(bindings) do
+        -- A portrait-only shortcut; party/raid frames retain the user's spell
+        -- bindings. Install it before combat through the existing click delegate.
+        local bindingAction = frame == PlayerFrame and b.prefix == "shift-" and b.button == 1
+            and "settings" or b.action
         local key = b.prefix .. "type" .. b.button
         local plainLeft = b.prefix == "" and b.button == 1
-        if not plainLeft and b.action ~= "spell" and frames[frame].bindingDrivers[key] then
+        if not plainLeft and bindingAction ~= "spell" and frames[frame].bindingDrivers[key] then
             UnregisterAttributeDriver(frame, key)
             frames[frame].bindingDrivers[key] = nil
         end
         local delegate
-        if b.action == "settings" then delegate = A.settingsButton
-        elseif b.action == "togglemenu" then delegate = MenuButton(frame) end
+        if bindingAction == "settings" then delegate = A.settingsButton
+        elseif bindingAction == "togglemenu" then delegate = MenuButton(frame) end
         Set(frame, b.prefix .. "clickbutton" .. b.button, delegate)
         if delegate then
             Set(frame, key, "click")
         elseif not plainLeft then
-            local action = b.action
+            local action = bindingAction
             if action == "spell" then
                 action = b.spell and not HealOutOfRange(b.spell, Unit(frame)) and "macro" or "none"
                 local expression = "[combat] " .. (b.spell and "macro" or "none") .. "; " .. action
@@ -313,8 +345,8 @@ local function Apply(frame)
             end
         end
         if not (b.prefix == "" and b.button == 1) then
-            Set(frame, b.prefix .. "spell" .. b.button, b.action == "spell" and (b.spell or "") or nil)
-            Set(frame, b.prefix .. "macrotext" .. b.button, b.action == "spell" and b.spell and CastMacro(b.spell) or nil)
+            Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
+            Set(frame, b.prefix .. "macrotext" .. b.button, bindingAction == "spell" and b.spell and CastMacro(b.spell) or nil)
         end
     end
     local heal, left
@@ -424,10 +456,16 @@ refresh = function()
         for key, original in pairs(state.original) do PlayerFrame:SetAttribute(key, original[1]) end
         PlayerFrame:RegisterForClicks("AnyUp")
         A.UpdateBuffIndicator(PlayerFrame)
+        if hoveredFrame == PlayerFrame then
+            if addonTooltip then addonTooltip:Hide() end
+            if GameTooltip and GameTooltip:IsOwned(PlayerFrame) then GameTooltip:Hide() end
+            hoveredFrame = nil
+        end
         frames[PlayerFrame] = nil
     end
     discover()
     for frame in pairs(frames) do Apply(frame) end
+    if hoveredFrame and frames[hoveredFrame] then ShowFrameTooltip(hoveredFrame) end
 end
 local function Queue()
     if queued or not ready or InCombatLockdown() then return end
@@ -584,6 +622,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         if event == "PLAYER_REGEN_DISABLED" then
             pendingBuffAttempt = nil
             A.HideBuffIndicators()
+            if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
             -- Hide a precombat tooltip rather than leave an obsolete buff hint up.
             if GameTooltip then
                 for frame in pairs(frames) do
@@ -600,5 +639,6 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         if event == "PLAYER_REGEN_ENABLED" then EnsureExplicitTargeting(); BuildBindings() end
         -- Never inspect auras, unit health, or protected attributes in combat.
         if not InCombatLockdown() then Queue() end
+        if event == "MODIFIER_STATE_CHANGED" and hoveredFrame then ShowFrameTooltip(hoveredFrame) end
     end
 end)

@@ -6,9 +6,13 @@ local colors = {
     [1243] = {1, 0.85, 0.45},     -- Fortitude
     [14752] = {0.55, 0.75, 1},    -- Divine Spirit
     [976] = {0.6, 0.3, 0.95},     -- Shadow Protection
-    [1459] = {0.3, 0.65, 1},      -- Arcane Intellect
 }
 local fallbackColor = {0.5, 1, 0.65}
+
+local function publicNumber(value)
+    if issecretvalue and issecretvalue(value) then return end
+    if type(value) == "number" then return value end
+end
 
 -- A continuous alpha mask avoids the clipped dashes produced by rotating small
 -- solid-color textures. All pieces share one pulse and one stroke profile.
@@ -31,26 +35,33 @@ local function CreatePlayerGlow(host, portrait, health, mana)
     local arc = piece("PlayerGlowArc")
     local middle = piece("PlayerGlowHorizontal")
     local cap = piece("PlayerGlowVertical")
+    -- Let the UI resolve the bar's right edge. Its screen coordinates can be
+    -- secret even outside combat, so Lua must never read or subtract them.
+    local rightGuide = overlay:CreateTexture(nil, "OVERLAY")
+    rightGuide:SetHeight(1)
     local function layout()
-        local width, height = portrait:GetWidth(), portrait:GetHeight()
+        local width = publicNumber(portrait:GetWidth())
+        local height = publicNumber(portrait:GetHeight())
+        -- Retain the last valid anchors if dimensions temporarily become
+        -- restricted; never calculate with a secret value.
+        if not width or not height then return end
         local scale = (height + 16) / 112
         local capWidth = 32 * scale
-        local frameScale = overlay:GetEffectiveScale()
-        local left = portrait:GetLeft()
-        local right = health:GetRight()
-        if not left or not right then return end
-        local span = (right * health:GetEffectiveScale() - left * portrait:GetEffectiveScale()) / frameScale
+        glow.badgeOffsetY = -30 * scale
         -- Expanded transparent margins keep the blur intact on every side,
         -- without moving the established portrait, level or panel contours.
         local paddedTop = 8 + 8 * scale
         arc:SetPoint("TOPLEFT", portrait, "TOPLEFT", -8 - (width + 16) * 16 / 112, paddedTop)
         arc:SetSize((width + 16) * 128 / 112, (height + 16) * 144 / 112)
-        cap:SetPoint("TOPLEFT", portrait, "TOPLEFT", span + 1 - capWidth / 2, paddedTop)
+        rightGuide:SetPoint("TOPLEFT", arc, "TOPLEFT")
+        rightGuide:SetPoint("TOPRIGHT", health, "TOPRIGHT", 1, 0)
+        cap:SetPoint("TOP", rightGuide, "TOPRIGHT")
         cap:SetSize(capWidth, (height + 16) * 128 / 112)
         middle:SetPoint("TOPLEFT", arc, "TOPRIGHT")
         middle:SetPoint("BOTTOMRIGHT", cap, "BOTTOMLEFT")
     end
     glow.layout = layout
+    glow.badgeAnchor = cap
     layout()
 
     local pulse = overlay:CreateAnimationGroup()
@@ -175,6 +186,12 @@ function A.UpdateBuffIndicator(frame, spell, spellID)
     local color = colors[spellID] or fallbackColor
     view.background:SetColorTexture(color[1], color[2], color[3], 1)
     A.SetGlow(view.glow, color, true)
+    if view.glow.badgeAnchor and view.glow.badgeOffsetY then
+        -- Account for the cap's transparent blur padding, keeping a three-unit
+        -- gap outside the visible panel corner rather than PlayerFrame bounds.
+        view.background:ClearAllPoints()
+        view.background:SetPoint("TOPLEFT", view.glow.badgeAnchor, "TOP", 3, view.glow.badgeOffsetY)
+    end
     view.background:Show()
     view.icon:Show()
 end
