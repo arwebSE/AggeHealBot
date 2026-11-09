@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0 — 2026-11-09
+
+- Show the next-buff icon and colored animated outline on the player portrait when portrait click-healing is enabled.
+- Shape the player-frame glow around the circular portrait, level badge and rounded name/health/mana panel.
+- Use a soft, blurred buff glow with a synchronized pulse across the player-frame outline.
+- Register Forever's pooled standard party frames so buff reminders work with the regular party layout as well as raid-style frames.
+
 ## 0.4.5 — 2026-11-08
 
 - Move the next-buff icon outside each unit frame's top-right corner, leaving Blizzard's own buff icons unobstructed.

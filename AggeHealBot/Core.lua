@@ -101,7 +101,8 @@ end
 local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
-    if not (name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
+    local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
+    if not (normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
         or name:match("^PartyFrameMemberFrame%d+$") or name:match("^CompactPartyFrameMember%d+$")
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
@@ -364,6 +365,12 @@ local function HookFunctions()
             hooks[name] = true
         end
     end
+    -- Forever's standard party frames are pooled anonymous children of
+    -- PartyFrame; refresh them after Blizzard reassigns their unit tokens.
+    if PartyMemberFrameMixin and PartyMemberFrameMixin.UpdateMember and not hooks.normalPartyFrames then
+        hooksecurefunc(PartyMemberFrameMixin, "UpdateMember", Register)
+        hooks.normalPartyFrames = true
+    end
 end
 discover = function()
     HookFunctions()
@@ -374,7 +381,11 @@ discover = function()
         Register(_G["CompactPartyFrameMember" .. i])
     end
     if PartyFrame then
-        for i = 1, 5 do Register(PartyFrame["MemberFrame" .. i]) end
+        for i = 1, 5 do
+            local member = PartyFrame.GetPartyMemberFrame and PartyFrame:GetPartyMemberFrame(i)
+                or PartyFrame["MemberFrame" .. i]
+            Register(member)
+        end
     end
     for i = 1, 40 do Register(_G["CompactRaidFrame" .. i]) end
     for group = 1, 8 do
