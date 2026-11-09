@@ -8,12 +8,14 @@ Start with ready-made class bindings, change them in `/ahb`, and see which missi
 
 ## Install
 
-1. Download `AggeHealBot-v0.4.2.zip` from [Releases](https://github.com/arwebSE/AggeHealBot/releases).
+1. Download the latest `AggeHealBot` ZIP from [Releases](https://github.com/arwebSE/AggeHealBot/releases).
 2. Extract the `AggeHealBot` folder into `_forever_/Interface/AddOns/`.
 3. Enable the addon and reload the UI. Restart the client if it does not discover the newly installed folder.
-4. Type `/ahb` to review or change your bindings.
+4. Type `/ahb` or open **Options → AddOns → AggeHealBot** to review or change your bindings. Both use the same editor.
 
 The resulting path should be `_forever_/Interface/AddOns/AggeHealBot/AggeHealBot.toc`.
+
+The login message shows your installed version, and the addon list displays a built-in healing icon.
 
 Enable **Use Raid-Style Party Frames** in WoW's settings if you want compact raid-style frames in a party. Regular Blizzard party frames also work.
 
@@ -24,7 +26,7 @@ Enable **Use Raid-Style Party Frames** in WoW's settings if you want compact rai
 - **Custom bindings:** buttons 1–5 and every combination of Shift, Ctrl and Alt, saved per character.
 - **Focused spell browser:** icons, search and category filters; heals first, then buffs, utility and other active spells. Passive abilities are omitted.
 - **Missing buffs:** outside combat, plain left click can prioritize a missing class buff before its normal spell.
-- **Visual cues:** an icon and pulsing frame outline identify the next buff. Colors change with the buff.
+- **Visual cues:** an icon just outside each unit frame's top-right corner and a pulsing frame outline identify the next buff. Colors change with the buff; Blizzard's own aura icons remain unobstructed.
 - **Small settings menu:** Blizzard-style frame art, colored category labels and animated selection borders.
 - **Menu shortcuts:** assign Target, Assist, Unit Menu, Settings or Disabled; mouse menu bindings toggle open and closed.
 
@@ -54,6 +56,8 @@ Missing-buff priority is **on by default**. It applies only outside combat and o
 - Mage: Arcane Intellect; Arcane Brilliance also satisfies it.
 
 Once the unit has its buffs, left click returns to its assigned spell. The buff icon and outline disappear when buffs are complete, combat begins, a modifier is held or buff priority is turned off. Unreachable buff targets are blocked instead of falling through to another spell.
+
+Higher-rank auras are recognized through their canonical spell names, even when the displayed aura name differs. If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
 Two optional settings are **off by default**:
 

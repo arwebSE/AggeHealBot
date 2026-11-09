@@ -70,16 +70,16 @@ function A.UpdateBuffIndicator(frame, spell, spellID)
     end
     if not view then
         view = {}
-        -- Compact frame health bars are child frames; draw on their overlay layer
-        -- so the icon stays above the health fill without changing frame levels.
+        -- Keep the outline above the health bar, but anchor the next-buff badge
+        -- outside the whole unit frame so it cannot cover Blizzard's aura row.
         local host = frame.healthBar or frame.healthbar or frame.HealthBar or frame
-        view.background = host:CreateTexture(nil, "OVERLAY", nil, 5)
+        view.background = frame:CreateTexture(nil, "OVERLAY", nil, 5)
         view.background:SetColorTexture(0.04, 0.08, 0.04, 0.9)
         view.background:SetSize(22, 22)
-        view.background:SetPoint("BOTTOMRIGHT", -2, 2)
-        view.icon = host:CreateTexture(nil, "OVERLAY", nil, 6)
+        view.background:SetPoint("TOPLEFT", frame, "TOPRIGHT", 6, -2)
+        view.icon = frame:CreateTexture(nil, "OVERLAY", nil, 6)
         view.icon:SetSize(20, 20)
-        view.icon:SetPoint("BOTTOMRIGHT", -3, 3)
+        view.icon:SetPoint("TOPLEFT", view.background, "TOPLEFT", 1, -1)
         view.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         view.glow = CreateGlow(host, frame)
         indicators[frame] = view

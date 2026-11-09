@@ -1,10 +1,13 @@
 local ADDON, A = ...
+local getMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+A.version = getMetadata and getMetadata(ADDON, "Version") or "dev"
 local frames, hooks, names, learned, bindings, hookedFrames = {}, {}, {}, {}, {}, {}
 local ready, queued, refresh, discover
 local class
 local spellDetails = {}
 local openUnitMenu, openUnitMenuUnit
 local raidControlsHiddenByUs = false
+local rejectedBuffs, pendingBuffAttempt = {}, nil
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
 local function EnsureExplicitTargeting()
@@ -103,17 +106,51 @@ local function Eligible(frame)
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
 end
-local function MissingBuff(unit)
-    if not AggeHealBotDB.smartBuffs or not unit or not UnitExists(unit)
-        or not UnitCanAssist("player", unit) or UnitIsDeadOrGhost(unit) then return end
-    local present = {}
+local function HelpfulAuras(unit)
+    local present, evidence = {}, {}
     for i = 1, 80 do
         local aura = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
         if not aura then break end
         -- Forever can restrict aura data. Unknown data must never select a buff.
         if secret(aura.name) or secret(aura.spellId) then return end
         if aura.name then present[aura.name] = true end
+        -- Forever aura display names can differ from their spell's canonical
+        -- name. Resolve the live rank ID too, not just the displayed name.
+        local canonical = aura.spellId and SpellName(aura.spellId)
+        if canonical then present[canonical] = true end
+        if secret(aura.auraInstanceID) then return end
+        local key = aura.auraInstanceID or (aura.spellId and ("spell:" .. aura.spellId)) or aura.name
+        if key then evidence[key] = true end
     end
+    return present, evidence
+end
+local function UnitKey(unit)
+    local guid = UnitGUID(unit)
+    if not secret(guid) and type(guid) == "string" then return guid end
+end
+local function RejectedBuffStillActive(guid, spell, evidence)
+    local list = guid and rejectedBuffs[guid]
+    local rejected = list and list[spell]
+    if not rejected then return false end
+    -- Additions/refreshes don't invalidate a rejection; a removed/replaced
+    -- aura can be the blocker disappearing, so allow the client to retry then.
+    local hasEvidence = false
+    for key in pairs(rejected) do
+        hasEvidence = true
+        if not evidence[key] then
+            list[spell] = nil
+            return false
+        end
+    end
+    if not hasEvidence and next(evidence) then list[spell] = nil; return false end
+    return true
+end
+local function MissingBuff(unit)
+    if not AggeHealBotDB.smartBuffs or not unit or not UnitExists(unit)
+        or not UnitCanAssist("player", unit) or UnitIsDeadOrGhost(unit) then return end
+    local present, evidence = HelpfulAuras(unit)
+    if not present then return end
+    local guid = UnitKey(unit)
     for _, group in ipairs(A.buffs[class] or {}) do
         local name = Resolve({group[1]})
         local exists = false
@@ -121,7 +158,7 @@ local function MissingBuff(unit)
             local buffName = SpellName(id)
             if buffName and present[buffName] then exists = true end
         end
-        if name and not exists then return name, group[1] end
+        if name and not exists and not RejectedBuffStillActive(guid, name, evidence) then return name, group[1], evidence end
     end
 end
 local function Set(frame, key, value)
@@ -194,10 +231,22 @@ local function Apply(frame)
     end
     if not hookedFrames[frame] then
         hookedFrames[frame] = true
-        frame:HookScript("PreClick", function(self)
+        frame:HookScript("PreClick", function(self, button)
+            pendingBuffAttempt = nil
             -- Recheck immediately before an out-of-combat click, including when
             -- the target moved out of range while the mouse stayed on its frame.
-            if frames[self] and not InCombatLockdown() then Apply(self) end
+            if frames[self] and not InCombatLockdown() then
+                Apply(self)
+                local state = frames[self]
+                if button == "LeftButton" and state.nextBuff and not (IsModifierKeyDown and IsModifierKeyDown()) then
+                    local unit = Unit(self)
+                    local guid = unit and UnitKey(unit)
+                    if guid then
+                        pendingBuffAttempt = {unit = unit, guid = guid, spell = state.nextBuff,
+                            evidence = state.buffEvidence, time = GetTime()}
+                    end
+                end
+            end
         end)
         frame:HookScript("OnEnter", function(self)
             if not frames[self] then return end
@@ -273,8 +322,9 @@ local function Apply(frame)
     end
     -- The secure driver restores healing when combat starts, without addon writes.
     -- Only plain left click changes; modifier bindings stay fixed.
-    local buff, buffID
-    if left.action == "spell" then buff, buffID = MissingBuff(Unit(frame)) end
+    local buff, buffID, evidence
+    if left.action == "spell" then buff, buffID, evidence = MissingBuff(Unit(frame)) end
+    frames[frame].buffEvidence = evidence
     local blocked = buff and not BuffInRange(buff, Unit(frame)) or false
     frames[frame].candidateBuff = buff
     frames[frame].rangeBlocked = blocked
@@ -458,14 +508,14 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     elseif msg == "status" then
         local n = 0
         for _ in pairs(frames) do n = n + 1 end
-        Print("0.4.2 | " .. n .. " stock frames registered | buffs " .. (AggeHealBotDB.smartBuffs and "on" or "off"))
+        Print(A.version .. " | " .. n .. " stock frames registered | buffs " .. (AggeHealBotDB.smartBuffs and "on" or "off"))
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_PET"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
-eventFrame:SetScript("OnEvent", function(_, event, arg)
+eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
     if event == "ADDON_LOADED" and arg == ADDON then
         AggeHealBotDB = AggeHealBotDB or {}
         if AggeHealBotDB.smartBuffs == nil then AggeHealBotDB.smartBuffs = true end
@@ -493,9 +543,35 @@ eventFrame:SetScript("OnEvent", function(_, event, arg)
                 end
             end
         end)
-        Print("Loaded. /ahb for bindings and settings.")
+        Print("v" .. A.version .. " loaded. /ahb for bindings and settings.")
     elseif ready then
+        if event == "UI_ERROR_MESSAGE" then
+            if not pendingBuffAttempt or InCombatLockdown() or secret(arg) or secret(message) then return end
+            local attempt = pendingBuffAttempt
+            pendingBuffAttempt = nil
+            if GetTime() - attempt.time > 1 or UnitKey(attempt.unit) ~= attempt.guid then return end
+            local errorName = GetGameMessageInfo and GetGameMessageInfo(arg)
+            if secret(errorName) then return end
+            local bounced = errorName == "SPELL_FAILED_AURA_BOUNCED" or errorName == "ERR_SPELL_FAILED_AURA_BOUNCED"
+                or (SPELL_FAILED_AURA_BOUNCED and message == SPELL_FAILED_AURA_BOUNCED)
+                or (ERR_SPELL_FAILED_AURA_BOUNCED and message == ERR_SPELL_FAILED_AURA_BOUNCED)
+            if bounced then
+                rejectedBuffs[attempt.guid] = rejectedBuffs[attempt.guid] or {}
+                rejectedBuffs[attempt.guid][attempt.spell] = attempt.evidence or {}
+                Queue()
+            end
+            return
+        end
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if arg == "player" then pendingBuffAttempt = nil end
+            return
+        end
+        if event == "UNIT_SPELLCAST_SENT" then
+            if arg == "player" and pendingBuffAttempt and SpellName(spellID) ~= pendingBuffAttempt.spell then pendingBuffAttempt = nil end
+            return
+        end
         if event == "PLAYER_REGEN_DISABLED" then
+            pendingBuffAttempt = nil
             A.HideBuffIndicators()
             -- Hide a precombat tooltip rather than leave an obsolete buff hint up.
             if GameTooltip then
@@ -505,7 +581,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg)
             end
             return
         end
-        if event == "SPELLS_CHANGED" and not InCombatLockdown() then BuildBindings() end
+        if event == "SPELLS_CHANGED" then
+            wipe(rejectedBuffs)
+            pendingBuffAttempt = nil
+            if not InCombatLockdown() then BuildBindings() end
+        end
         if event == "PLAYER_REGEN_ENABLED" then EnsureExplicitTargeting(); BuildBindings() end
         -- Never inspect auras, unit health, or protected attributes in combat.
         if not InCombatLockdown() then Queue() end

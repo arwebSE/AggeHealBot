@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.5 — 2026-11-08
+
+- Move the next-buff icon outside each unit frame's top-right corner, leaving Blizzard's own buff icons unobstructed.
+
+## 0.4.4 — 2026-11-08
+
+- Add the full binding editor to Options → AddOns → AggeHealBot, reusing the same controls as `/ahb` and fitting them to the native Options area.
+- Include the installed version in the login message and `/ahb status`, read from addon metadata.
+- Add a built-in healing icon to the game's addon list.
+
+## 0.4.3 — 2026-11-08
+
+- Recognize higher-rank buffs by their canonical spell name when the aura's displayed name differs.
+- Stop offering an out-of-combat buff after WoW reports that a more powerful conflicting effect is active, including differently named spells.
+- Remove the rejected buff's icon, glow and left-click priority for the affected player; proceed to the next buff or the assigned heal.
+- Reconsider rejected buffs when an observed aura disappears/is replaced or the spellbook changes, without treating added buffs as a reason to retry.
+- Associate rejection feedback with a recent plain-left-click buff attempt and the target's GUID, ignoring stale and unrelated errors.
+
 ## 0.4.2 — 2026-11-08
 
 Initial public release for WoW: Forever 1.60.1.

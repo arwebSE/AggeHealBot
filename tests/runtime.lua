@@ -1,8 +1,18 @@
 -- Run with a Lua 5.1+ interpreter, from the repository root.
 local combat, auras, drivers, callbacks = false, {}, {}, {}
 local ns, events = {}, nil
+local messages, originalPrint = {}, print
+function print(message) messages[#messages + 1] = tostring(message); originalPrint(message) end
+function GetAddOnMetadata(_, field)
+    if field == "Version" then return "test-version" end
+end
 local ranges, tickers = {}, {}
 local cvars = {autoSelfCast = "1", ActionButtonUseKeyDown = "1"}
+local now, guids = 100, {}
+function GetTime() return now end
+function UnitGUID(unit) return guids[unit] or ("GUID-" .. unit) end
+SPELL_FAILED_AURA_BOUNCED = "A more powerful spell is already active"
+function GetGameMessageInfo(errorID) return errorID == 42 and "SPELL_FAILED_AURA_BOUNCED" or "ERR_OUT_OF_RANGE" end
 function GetCVar(key) return cvars[key] end
 function SetCVar(key, value) assert(not combat, "CVar write during combat"); cvars[key] = value end
 local known = {[8936] = "Regrowth", [5185] = "Healing Touch", [774] = "Rejuvenation", [1126] = "Mark", [467] = "Thorns", [2782] = "Remove Curse", [2893] = "Abolish Poison"}
@@ -53,7 +63,7 @@ local function Region()
     return r
 end
 function CreateFrame(_, name, parent, template)
-    local f = {attrs = {}, scripts = {}, name = name, regions = {}, template = template}
+    local f = {attrs = {}, scripts = {}, name = name, regions = {}, template = template, parent = parent}
     function f:CreateTexture() local r = Region(); self.regions[#self.regions + 1] = r; return r end
     function f:CreateFontString() local r = Region(); self.regions[#self.regions + 1] = r; return r end
     function f:GetName() return self.name end
@@ -82,7 +92,7 @@ C_UnitAuras = {GetAuraDataByIndex = function(unit, i) return auras[unit] and aur
 SlashCmdList, UISpecialFrames = {}, {}
 PlayerFrame = CreateFrame("Button", "PlayerFrame")
 PlayerFrame:SetAttribute("unit", "player")
-local function event(e, arg) events.scripts.OnEvent(events, e, arg) end
+local function event(e, ...) events.scripts.OnEvent(events, e, ...) end
 local function mouseEdge(frame, button, down)
     local wanted = down and "AnyDown" or "AnyUp"
     local registered = false
@@ -99,6 +109,8 @@ assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
 event("ADDON_LOADED", "AggeHealBot")
 event("PLAYER_LOGIN")
+assert(ns.version == GetAddOnMetadata("AggeHealBot", "Version"))
+assert(messages[#messages]:find("v" .. ns.version .. " loaded", 1, true), "login announces installed TOC version")
 assert(cvars.autoSelfCast == "0", "disable client self-cast fallback for heals and buffs")
 assert(AggeHealBotDB.smartBuffs == true)
 assert(AggeHealBotDB.playerFrame == false, "portrait support defaults off")
@@ -181,6 +193,54 @@ assert(not drivers[CompactRaidFrame1], "no registration in combat")
 combat = false
 event("PLAYER_REGEN_ENABLED")
 assert(drivers[CompactRaidFrame1], "frames created in combat picked up afterward")
+-- Display names may differ from the live aura's canonical spell/rank name.
+spellNames[5232] = "Mark"
+auras.raid1 = {{name = "Empowered Wild display name", spellId = 5232, auraInstanceID = 501}}
+event("UNIT_AURA", "raid1")
+assert(CompactRaidFrame1.attrs.spell1 == "Thorns", "higher-rank aura recognized by canonical spell name")
+-- Different spells can block ours under the game's stacking rules.
+auras.raid1 = {{name = "Superior Ward", spellId = 9992, auraInstanceID = 502}}
+event("UNIT_AURA", "raid1")
+assert(CompactRaidFrame1.attrs.spell1 == "Mark")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Thorns", "rejected Mark skipped despite blocker having another name")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Regrowth", "normal heal restored when remaining buffs cannot be applied")
+assert(not CompactRaidFrame1.regions[2].shown and not CompactRaidFrame1.regions[3].shown, "rejected buffs have no icon or glow")
+event("UNIT_AURA", "raid1")
+assert(CompactRaidFrame1.attrs.spell1 == "Regrowth", "unchanged blocker must not reoffer rejected buffs")
+auras.raid1[2] = {name = "Temporary HoT", auraInstanceID = 503}
+event("UNIT_AURA", "raid1")
+assert(CompactRaidFrame1.attrs.spell1 == "Regrowth", "new unrelated aura does not trigger a retry")
+auras.raid1 = {}
+event("UNIT_AURA", "raid1")
+assert(CompactRaidFrame1.attrs.spell1 == "Mark", "removing conflicting buff restores offer")
+-- An error after another click, or an unrelated error, is not a buff rejection.
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "RightButton")
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Mark")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+event("UI_ERROR_MESSAGE", 99, "Out of range")
+assert(CompactRaidFrame1.attrs.spell1 == "Mark")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+now = now + 2
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Mark", "stale error not attributed to buff")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+guids.raid1 = "GUID-new-occupant"
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Mark", "failure must not carry over to another player")
+guids.raid1 = nil
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+event("UNIT_SPELLCAST_SENT", "player", "", "cast-other", 774)
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Mark", "unrelated spell error not attributed to prior buff click")
+CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1, "LeftButton")
+event("UNIT_SPELLCAST_SUCCEEDED", "player")
+event("UI_ERROR_MESSAGE", 42, SPELL_FAILED_AURA_BOUNCED)
+assert(CompactRaidFrame1.attrs.spell1 == "Mark", "successful cast clears pending error attribution")
 -- Movement/range gating must clear both action and spell, with no heal/self fallback.
 local playerSpellBefore = PlayerFrame.attrs.spell1
 ranges.raid1 = false
@@ -305,6 +365,13 @@ CreateFrame = function(kind, name, parent, template)
     for _, method in ipairs({"SetSize", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetJustifyH", "SetFocus", "ClearFocus"}) do
         f[method] = function() end
     end
+    function f:SetParent(value) self.parent = value end
+    function f:SetScale(value) self.scale = value end
+    function f:SetSize(width, height) self.width, self.height = width, height end
+    function f:GetWidth() return self.width or 780 end
+    function f:GetHeight() return self.height or 548 end
+    function f:SetFrameStrata(value) self.strata = value end
+    function f:GetFrameStrata() return self.strata or "DIALOG" end
     function f:SetText(value)
         self.text = value
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self) end
@@ -314,6 +381,10 @@ CreateFrame = function(kind, name, parent, template)
     function f:GetChecked() return self.checked end
     function f:Show() self.shown = true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
     function f:IsShown() return self.shown end
+    function f:IsVisible()
+        if not self.shown then return false end
+        return not self.parent or not self.parent.IsVisible or self.parent:IsVisible()
+    end
     function f:Hide()
         self.shown = false
         if self.scripts.OnHide then self.scripts.OnHide(self) end
@@ -321,7 +392,7 @@ CreateFrame = function(kind, name, parent, template)
     function f:CreateFontString() return CreateFrame("FontString") end
     f.TitleText = {SetText = function() end}
     if template == "PortraitFrameTemplate" then
-        f.NineSlice = {}
+        f.NineSlice = CreateFrame("Frame")
         f.TitleContainer = CreateFrame("Frame")
         f.PortraitContainer = CreateFrame("Frame")
         f.Bg = Region()
@@ -329,8 +400,20 @@ CreateFrame = function(kind, name, parent, template)
     return f
 end
 NineSliceUtil = {ApplyLayoutByName = function(frame, layout) frame.layout = layout end}
+local registeredCanvas, registeredCategory
+Settings = {
+    RegisterCanvasLayoutCategory = function(canvas, name)
+        assert(name == "AggeHealBot")
+        registeredCanvas = canvas
+        return {name = name, GetID = function() return 77 end}
+    end,
+    RegisterAddOnCategory = function(category) registeredCategory = category end,
+}
 tinsert = table.insert
 assert(loadfile("AggeHealBot/Options.lua"))("AggeHealBot", ns)
+assert(registeredCanvas and registeredCategory, "editor registered in Options AddOns")
+local category = ns.RegisterOptionsCategory()
+assert(category == registeredCategory, "category registration is idempotent")
 SlashCmdList.AGGEHEALBOT("")
 assert(AggeHealBotSettings.shown, "settings opens")
 assert(AggeHealBotSettings.NineSlice.layout == "ButtonFrameTemplateNoPortrait", "native Blizzard frame layout")
@@ -386,4 +469,20 @@ assert(browser.empty.shown and not browser.rows[1].shown, "empty search state")
 browser.search:SetText("")
 browser.tabs[1].scripts.OnClick(browser.tabs[1])
 assert(browser.rows[1].choice.category == "heals", "all spells begins with heals, not actions")
+local samePanel, sameBinding = AggeHealBotSettings, AggeHealBotSettings.rows[2].button
+registeredCanvas:SetSize(650, 500)
+registeredCanvas:SetFrameStrata("HIGH")
+registeredCanvas:Show()
+assert(AggeHealBotSettings == samePanel and samePanel.parent == registeredCanvas, "native settings uses the same editor instance")
+assert(samePanel.rows[2].button == sameBinding and samePanel.scale < 1, "same controls fit native options area")
+assert(samePanel:GetFrameStrata() == "HIGH", "embedded editor stays above native options background")
+assert(not samePanel.NineSlice.shown and not samePanel.done.shown, "embedded editor hides standalone chrome")
+registeredCanvas:Hide()
+assert(not samePanel.shown, "changing category hides embedded editor")
+SlashCmdList.AGGEHEALBOT("")
+assert(samePanel.parent == UIParent and samePanel.shown and samePanel.scale == 1, "slash command restores standalone editor")
+assert(samePanel.NineSlice.shown and samePanel.done.shown, "standalone chrome restored")
+local escapeEntries = 0
+for _, name in ipairs(UISpecialFrames) do if name == "AggeHealBotSettings" then escapeEntries = escapeEntries + 1 end end
+assert(escapeEntries == 1, "standalone Escape entry is not duplicated")
 print("PASS: inline UI, search/selection, category filters, passive removal, spell priority, raid controls optional/default visible")

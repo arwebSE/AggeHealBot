@@ -1,5 +1,6 @@
 local _, A = ...
 local panel, picker, selected, selectedButton = nil, nil, 1, 1
+local optionsCanvas, optionsCategory
 local categoryLabels = {heals = "Heal", buffs = "Buff", utility = "Utility", other = "Other", actions = "Action"}
 local categoryColors = {heals = {0.5, 1, 0.7}, buffs = {0.5, 0.75, 1}, utility = {0.8, 0.6, 1}, other = {0.6, 0.62, 0.66}, actions = {0.85, 0.75, 0.5}}
 local selectionGold = {1, 0.76, 0.2}
@@ -196,7 +197,36 @@ local function OpenPicker(button)
     picker:Show()
     Update()
 end
-function A.ShowOptions()
+local function FitEditor(host)
+    if not panel or panel.embeddedHost ~= host then return end
+    local width, height = host:GetWidth(), host:GetHeight()
+    if width > 0 and height > 0 then panel:SetScale(math.min(1, width / 780, height / 548)) end
+end
+local function PlaceEditor(host)
+    panel.embeddedHost = host
+    panel:SetParent(host or UIParent)
+    panel:ClearAllPoints()
+    if host then panel:SetPoint("CENTER", host, "CENTER", 0, 0)
+    else panel:SetPoint("CENTER") end
+    panel:SetScale(1)
+    panel:SetFrameStrata(host and host:GetFrameStrata() or "DIALOG")
+    panel:SetMovable(not host)
+    panel:SetClampedToScreen(not host)
+    -- The native Options window supplies its own frame and close controls.
+    for _, key in ipairs({"NineSlice", "TitleContainer", "CloseButton", "Bg", "TopTileStreaks", "done"}) do
+        local region = panel[key]
+        if region then
+            if host then region:Hide() else region:Show() end
+        end
+    end
+    for i = #UISpecialFrames, 1, -1 do
+        if UISpecialFrames[i] == "AggeHealBotSettings" then table.remove(UISpecialFrames, i) end
+    end
+    if host then FitEditor(host)
+    else tinsert(UISpecialFrames, "AggeHealBotSettings") end
+end
+function A.ShowOptions(host)
+    if not host and panel and panel.embeddedHost and panel.embeddedHost:IsVisible() then host = panel.embeddedHost end
     if not panel then
         panel = CreateFrame("Frame", "AggeHealBotSettings", UIParent, "PortraitFrameTemplate")
         -- Use the same frame art as Forever's character window, without a portrait.
@@ -216,7 +246,7 @@ function A.ShowOptions()
         panel:EnableMouse(true)
         panel:SetMovable(true)
         panel:RegisterForDrag("LeftButton")
-        panel:SetScript("OnDragStart", panel.StartMoving)
+        panel:SetScript("OnDragStart", function(self) if not self.embeddedHost then self:StartMoving() end end)
         panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
         local title = panel.TitleContainer and panel.TitleContainer.TitleText or panel.TitleText
         title:SetText("AggeHealBot")
@@ -266,15 +296,48 @@ function A.ShowOptions()
             OpenPicker(selectedButton)
         end)
         panel.status = Text(panel, "", 24, -516, "GameFontHighlightSmall")
-        Button(panel, "Done", 100, 655, -508, function() panel:Hide() end)
+        panel.done = Button(panel, "Done", 100, 655, -508, function() panel:Hide() end)
         panel:SetScript("OnHide", function() if picker then picker:Hide() end end)
         for _, event in ipairs({"PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "SPELLS_CHANGED"}) do panel:RegisterEvent(event) end
         panel:SetScript("OnEvent", Update)
     end
+    PlaceEditor(host)
     panel:Show()
     OpenPicker(selectedButton)
 end
 function A.ToggleOptions()
-    if panel and panel:IsShown() then panel:Hide()
+    if panel and panel:IsVisible() then
+        if panel.embeddedHost and HideUIPanel then
+            local root = SettingsPanel and SettingsPanel:IsShown() and SettingsPanel
+                or InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() and InterfaceOptionsFrame
+            if root then HideUIPanel(root) else panel:Hide() end
+        else panel:Hide() end
     else A.ShowOptions() end
 end
+
+function A.RegisterOptionsCategory()
+    if optionsCategory then return optionsCategory end
+    local modern = Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory
+    if not modern and not InterfaceOptions_AddCategory then return end
+    optionsCanvas = CreateFrame("Frame", "AggeHealBotOptionsCanvas", UIParent)
+    optionsCanvas.name = "AggeHealBot"
+    optionsCanvas:Hide()
+    optionsCanvas:SetScript("OnShow", function(self) A.ShowOptions(self) end)
+    optionsCanvas:SetScript("OnHide", function(self)
+        if panel and panel.embeddedHost == self then panel:Hide() end
+    end)
+    optionsCanvas:SetScript("OnSizeChanged", function(self) FitEditor(self) end)
+    if modern then
+        optionsCategory = Settings.RegisterCanvasLayoutCategory(optionsCanvas, "AggeHealBot")
+        Settings.RegisterAddOnCategory(optionsCategory)
+    else
+        InterfaceOptions_AddCategory(optionsCanvas)
+        optionsCategory = optionsCanvas
+    end
+    return optionsCategory
+end
+local registration = CreateFrame("Frame")
+registration:RegisterEvent("PLAYER_LOGIN")
+registration:RegisterEvent("ADDON_LOADED")
+registration:SetScript("OnEvent", function() A.RegisterOptionsCategory() end)
+A.RegisterOptionsCategory()

@@ -2,7 +2,8 @@
 ## Title: AggeHealBot
 ## Notes: Simple click healing on Blizzard party and raid frames.
 ## Author: Agge
-## Version: 0.4.2
+## Version: 0.4.5
+## IconTexture: Interface\Icons\Spell_Nature_HealingTouch
 ## SavedVariablesPerCharacter: AggeHealBotDB
 
 Defaults.lua
