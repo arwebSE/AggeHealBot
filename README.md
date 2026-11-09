@@ -87,6 +87,17 @@ Run `lua tests/runtime.lua` from the repository root using Lua 5.1 or newer. The
 
 These tests use a mocked WoW runtime. Secure execution and appearance must also be checked in the actual client.
 
+## Releasing
+
+GitHub Actions packages and uploads each pushed `v*` tag to CurseForge. Before tagging, update the version in `AggeHealBot/AggeHealBot.toc` and add the release notes to `CHANGELOG.md`. Push the changes, then push an annotated tag such as `v0.4.6`:
+
+```sh
+git tag -a v0.4.6 -m "AggeHealBot v0.4.6"
+git push origin v0.4.6
+```
+
+The `CF_API_TOKEN` GitHub Actions secret is used only by the tagged release workflow.
+
 ## License and attribution
 
 [MIT](LICENSE). Binding choices were inspired by HealBot Continued; the implementation is independent. Blizzard UI artwork is referenced from the game client and is not redistributed in this repository. This project is not affiliated with Blizzard Entertainment or HealBot Continued.
