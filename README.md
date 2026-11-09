@@ -2,11 +2,11 @@
 
 Click-cast healing for **World of Warcraft: Forever**, using Blizzard's own party and raid frames.
 
-**[Install from CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [Download ZIP](https://github.com/arwebSE/AggeHealBot/releases) · [Report a bug](https://github.com/arwebSE/AggeHealBot/issues)
+**[Install from CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [Latest GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest) · [Report a bug](https://github.com/arwebSE/AggeHealBot/issues)
 
 Start with ready-made class bindings, change them in `/ahb`, and see which missing buff your next left click will cast. No replacement unit frames or library dependencies.
 
-**Supported client:** Forever 1.60.1, interface 16001. The druid setup has received in-game testing. Other class presets are included but need further playtesting.
+**Supported client:** WoW Forever 1.60.1, interface 16001.
 
 ## See it in game
 
@@ -95,7 +95,7 @@ Binding edits made during combat apply after combat ends. Existing Blizzard clic
 
 Run `lua tests/runtime.lua` from the repository root using Lua 5.1 or newer. The tests also run with Fengari. They cover default and custom bindings, spell ranking by name, buff priority, range guards, combat write restrictions, cursor-cleanup macros, frame filtering, portrait restoration, menus, spell categories, settings and animation lifecycle.
 
-These tests use a mocked WoW runtime. Secure execution and appearance must also be checked in the actual client.
+These tests use a mocked WoW runtime. Secure execution and appearance must also be checked in the actual client. The druid setup has received in-game testing; other class presets still need class-specific validation.
 
 ## Releasing
 
