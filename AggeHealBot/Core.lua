@@ -9,6 +9,7 @@ local openUnitMenu, openUnitMenuUnit
 local raidControlsHiddenByUs = false
 local rejectedBuffs, pendingBuffAttempt = {}, nil
 local hoveredFrame, addonTooltip
+local targetVisibilityDriver
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
 local function EnsureExplicitTargeting()
@@ -261,7 +262,15 @@ local function ShowFrameTooltip(frame)
         -- Leave Blizzard's unit details intact, including its normal live
         -- refreshes; our binding information lives in a separate panel.
         if not GameTooltip:IsOwned(frame) then
-            GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+            -- The friendly-target click surface has no native OnEnter to
+            -- position GameTooltip. Use Blizzard's default anchor so it does
+            -- not occupy the same frame-relative position as our panel.
+            if GameTooltip_SetDefaultAnchor then GameTooltip_SetDefaultAnchor(GameTooltip, frame)
+            else
+                GameTooltip:SetOwner(frame, "ANCHOR_NONE")
+                GameTooltip:ClearAllPoints()
+                GameTooltip:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -16, 16)
+            end
             GameTooltip:SetUnit(unit)
         end
         GameTooltip:Show()
@@ -422,6 +431,7 @@ local function Apply(frame)
 end
 local function Register(frame)
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
+    if frame == A.targetButton and not AggeHealBotDB.targetFrame then return end
     if Eligible(frame) and not InCombatLockdown() then Apply(frame) end
 end
 local function HookFunctions()
@@ -438,8 +448,24 @@ local function HookFunctions()
         hooks.normalPartyFrames = true
     end
 end
+local function RestoreFrame(frame)
+    local state = frame and frames[frame]
+    if not state then return end
+    UnregisterAttributeDriver(frame, "spell1")
+    UnregisterAttributeDriver(frame, "type1")
+    for key in pairs(state.bindingDrivers) do UnregisterAttributeDriver(frame, key) end
+    for key, original in pairs(state.original) do frame:SetAttribute(key, original[1]) end
+    frame:RegisterForClicks("AnyUp")
+    A.UpdateBuffIndicator(frame)
+    if hoveredFrame == frame then
+        if addonTooltip and addonTooltip:IsOwned(frame) then addonTooltip:Hide() end
+        if GameTooltip and GameTooltip:IsOwned(frame) then GameTooltip:Hide() end
+        hoveredFrame = nil
+    end
+    frames[frame] = nil
+end
 local function RegisterTargetFrame()
-    if not TargetFrame then return end
+    if not TargetFrame or (not AggeHealBotDB.targetFrame and not A.targetButton) then return end
     if not A.targetButton then
         -- A secure friendly-only click surface leaves the stock target button
         -- and enemy interactions intact, including target switches in combat.
@@ -464,9 +490,14 @@ local function RegisterTargetFrame()
             end
         end)
         A.targetButton = button
-        RegisterStateDriver(button, "visibility", "[@target,exists,help] show; hide")
     end
-    Register(A.targetButton)
+    local visibility = AggeHealBotDB.targetFrame and "[@target,exists,help] show; hide" or "hide"
+    if targetVisibilityDriver ~= visibility then
+        RegisterStateDriver(A.targetButton, "visibility", visibility)
+        targetVisibilityDriver = visibility
+    end
+    if AggeHealBotDB.targetFrame then Register(A.targetButton)
+    else RestoreFrame(A.targetButton) end
 end
 discover = function()
     HookFunctions()
@@ -514,19 +545,7 @@ refresh = function()
     if not ready or InCombatLockdown() then return end
     ApplyRaidControls()
     if PlayerFrame and frames[PlayerFrame] and not AggeHealBotDB.playerFrame then
-        local state = frames[PlayerFrame]
-        UnregisterAttributeDriver(PlayerFrame, "spell1")
-        UnregisterAttributeDriver(PlayerFrame, "type1")
-        for key in pairs(state.bindingDrivers) do UnregisterAttributeDriver(PlayerFrame, key) end
-        for key, original in pairs(state.original) do PlayerFrame:SetAttribute(key, original[1]) end
-        PlayerFrame:RegisterForClicks("AnyUp")
-        A.UpdateBuffIndicator(PlayerFrame)
-        if hoveredFrame == PlayerFrame then
-            if addonTooltip then addonTooltip:Hide() end
-            if GameTooltip and GameTooltip:IsOwned(PlayerFrame) then GameTooltip:Hide() end
-            hoveredFrame = nil
-        end
-        frames[PlayerFrame] = nil
+        RestoreFrame(PlayerFrame)
     end
     discover()
     for frame in pairs(frames) do Apply(frame) end
@@ -597,7 +616,7 @@ A.SaveBinding = function(prefix, button, action, spell)
     return true
 end
 A.SetOption = function(key, value)
-    if key ~= "smartBuffs" and key ~= "playerFrame" and key ~= "hideRaidControls" then return end
+    if key ~= "smartBuffs" and key ~= "playerFrame" and key ~= "targetFrame" and key ~= "hideRaidControls" then return end
     AggeHealBotDB[key] = value and true or false
     Queue()
 end
@@ -634,6 +653,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         AggeHealBotDB = AggeHealBotDB or {}
         if AggeHealBotDB.smartBuffs == nil then AggeHealBotDB.smartBuffs = true end
         if AggeHealBotDB.playerFrame == nil then AggeHealBotDB.playerFrame = false end
+        if AggeHealBotDB.targetFrame == nil then AggeHealBotDB.targetFrame = true end
         if AggeHealBotDB.hideRaidControls == nil then AggeHealBotDB.hideRaidControls = false end
         AggeHealBotDB.bindings = AggeHealBotDB.bindings or {}
     elseif event == "PLAYER_LOGIN" then

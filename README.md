@@ -57,6 +57,8 @@ Once the unit has its buffs, left click returns to its assigned spell. The buff 
 
 Higher-rank auras are recognized through their canonical spell names, even when the displayed aura name differs. If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
+Target-frame click healing and buff watching are **on by default** and can be switched off in `/ahb`.
+
 Two optional settings are **off by default**:
 
 - Click healing on your player portrait, useful for solo testing.

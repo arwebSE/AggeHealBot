@@ -123,6 +123,7 @@ assert(ns.version == GetAddOnMetadata("AggeHealBot", "Version"))
 assert(messages[#messages]:find("v" .. ns.version .. " loaded", 1, true), "login announces installed TOC version")
 assert(cvars.autoSelfCast == "0", "disable client self-cast fallback for heals and buffs")
 assert(AggeHealBotDB.smartBuffs == true)
+assert(AggeHealBotDB.targetFrame == true, "target support must default on for existing saved settings without the new option")
 assert(AggeHealBotDB.playerFrame == false, "portrait support defaults off")
 assert(not drivers[PlayerFrame], "portrait untouched by default")
 ns.SetOption("playerFrame", true)
@@ -540,6 +541,8 @@ IsControlKeyDown = function() return ctrlHeld end
 IsAltKeyDown = function() return false end
 IsModifierKeyDown = function() return shiftHeld or ctrlHeld end
 GameTooltip = {lines = {}}
+function GameTooltip:ClearAllPoints() self.anchor = nil end
+function GameTooltip:SetPoint(...) self.anchor = {...} end
 function GameTooltip:SetOwner(owner) self.owner, self.lines = owner, {} end
 function GameTooltip:IsOwned(owner) return self.owner == owner end
 function GameTooltip:SetUnit(unit) self.lines = {unit} end
@@ -702,7 +705,7 @@ UnitExists = function(unit)
 end
 local targetVisibility
 local function secureTargetVisibility()
-    if targetExists and targetFriendly then ns.targetButton:Show() else ns.targetButton:Hide() end
+    if targetVisibility ~= "hide" and targetExists and targetFriendly then ns.targetButton:Show() else ns.targetButton:Hide() end
 end
 function RegisterStateDriver(frame, state, expression)
     assert(not combat and frame == ns.targetButton and state == "visibility")
@@ -761,3 +764,66 @@ secureTargetVisibility()
 event("PLAYER_TARGET_CHANGED")
 assert(not targetButton.shown and not targetButton.regions[2].shown, "clearing target must clear the indicator")
 print("PASS: friendly target bindings, buffs, native menus, range guards, target switching and secure enemy pass-through during combat")
+
+targetExists, targetFriendly = true, true
+secureTargetVisibility()
+event("PLAYER_TARGET_CHANGED")
+ns.ShowOptions()
+assert(AggeHealBotSettings.target:GetChecked(), "target setting must appear checked in the menu by default")
+targetButton.scripts.OnEnter(targetButton)
+assert(AggeHealBotTooltip.shown)
+AggeHealBotSettings.target:SetChecked(false)
+AggeHealBotSettings.target.scripts.OnClick(AggeHealBotSettings.target)
+assert(AggeHealBotDB.targetFrame == false and not targetButton.shown and targetVisibility == "hide")
+assert(not targetButton.regions[2].shown and not AggeHealBotTooltip.shown, "disabling target support must hide the buff icon and tooltip")
+assert(not drivers[targetButton].spell1 and not drivers[targetButton].type1, "disabled target must not retain healing/buff drivers")
+assert(TargetFrame.attrs.type1 == "target" and TargetFrame.attrs.type2 == "togglemenu", "disabling restores normal target interaction")
+local auraReadsWhileDisabled = 0
+local readableAuraGetter = C_UnitAuras.GetAuraDataByIndex
+C_UnitAuras.GetAuraDataByIndex = function(unit, index, filter)
+    if unit == "target" then auraReadsWhileDisabled = auraReadsWhileDisabled + 1 end
+    return readableAuraGetter(unit, index, filter)
+end
+event("UNIT_AURA", "target")
+assert(auraReadsWhileDisabled == 0, "disabled target support must stop watching target buffs")
+event("ADDON_LOADED", "AggeHealBot")
+assert(AggeHealBotDB.targetFrame == false, "saved opt-out must not reset to the default")
+C_UnitAuras.GetAuraDataByIndex = readableAuraGetter
+AggeHealBotSettings.target:SetChecked(true)
+AggeHealBotSettings.target.scripts.OnClick(AggeHealBotSettings.target)
+assert(ns.targetButton == targetButton and targetButton.shown and targetButton.regions[2].shown, "enabling must reuse the existing secure button and resume buff watching")
+assert(targetButton.attrs.spell1 == "Mark" and targetButton.clicks[1] == "AnyDown")
+combat = true
+ns.SetOption("targetFrame", false)
+assert(targetButton.shown and targetVisibility ~= "hide", "secure target disabling during combat must defer until combat ends")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not targetButton.shown and targetVisibility == "hide", "queued disable must apply after combat")
+combat = true
+ns.SetOption("targetFrame", true)
+assert(not targetButton.shown, "enabling during combat must also defer")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(targetButton.shown and targetVisibility == "[@target,exists,help] show; hide", "queued enable must restore secure friendly-only support")
+print("PASS: target option defaults on, preserves saved opt-out, disables watching and tooltips, reenables safely and defers combat changes")
+
+local defaultAnchorCalls = 0
+function GameTooltip_SetDefaultAnchor(tooltip, owner)
+    defaultAnchorCalls = defaultAnchorCalls + 1
+    tooltip:SetOwner(owner, "ANCHOR_NONE")
+    tooltip:ClearAllPoints()
+    tooltip:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -16, 16)
+end
+GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+targetButton.scripts.OnEnter(targetButton)
+assert(defaultAnchorCalls == 1 and GameTooltip.shown and GameTooltip:IsOwned(targetButton), "target hover must use Blizzard's default tooltip positioning")
+assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and AggeHealBotTooltip.ownerAnchor == "ANCHOR_RIGHT", "native target details and addon bindings must have separate anchors")
+event("UNIT_AURA", "target")
+assert(defaultAnchorCalls == 1, "refreshes must preserve the existing native tooltip anchor")
+targetButton.scripts.OnLeave(targetButton)
+GameTooltip_SetDefaultAnchor = nil
+GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+targetButton.scripts.OnEnter(targetButton)
+assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and GameTooltip.owner == targetButton, "fallback must also place native details away from the frame-relative binding tooltip")
+targetButton.scripts.OnLeave(targetButton)
+print("PASS: original target tooltip uses the native default position while addon bindings remain next to the target frame")

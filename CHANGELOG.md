@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3 — 2026-11-10
+
+- Add a target click-healing and buff-watch toggle, enabled by default for new and existing characters.
+- Turning target support off hides the click surface and buff indicator and restores normal target interaction. Changes made in combat apply after combat ends.
+- Use Blizzard's default position for the original target tooltip so it does not overlap the frame-relative AggeHealBot tooltip.
+
 ## 1.0.2 — 2026-11-10
 
 - Support click healing and buff watching on the stock friendly target frame, including a mirrored portrait/level outline, external buff icon and Shift + left-click settings shortcut.

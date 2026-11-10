@@ -71,6 +71,7 @@ local function Update()
     if not panel then return end
     panel.buffs:SetChecked(AggeHealBotDB.smartBuffs)
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
+    panel.target:SetChecked(AggeHealBotDB.targetFrame)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
@@ -270,28 +271,29 @@ function A.ShowOptions(host)
         end
         panel.buffs = Check("smartBuffs", "Buff missing buffs outside combat", -37)
         panel.player = Check("playerFrame", "Click-heal my player portrait", -67)
-        panel.raidControls = Check("hideRaidControls", "Hide Blizzard raid controls", -97)
-        Text(panel, "MODIFIERS — CLICK TO CHANGE", 24, -142, "GameFontHighlightSmall")
+        panel.target = Check("targetFrame", "Click-heal and watch buffs on my target", -97)
+        panel.raidControls = Check("hideRaidControls", "Hide Blizzard raid controls", -127)
+        Text(panel, "MODIFIERS — CLICK TO CHANGE", 24, -172, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel, label, 75, 24 + ((i - 1) % 4) * 78, -164 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel, label, 75, 24 + ((i - 1) % 4) * 78, -194 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
             panel.tabs[i]:EnableSelectionGlow()
         end
-        Text(panel, "CLICK", 24, -239, "GameFontHighlightSmall")
-        Text(panel, "ASSIGNED SPELL / ACTION", 104, -239, "GameFontHighlightSmall")
+        Text(panel, "CLICK", 24, -269, "GameFontHighlightSmall")
+        Text(panel, "ASSIGNED SPELL / ACTION", 104, -269, "GameFontHighlightSmall")
         panel.rows = {}
         for i = 1, 5 do
             local row = {}
-            row.label = Text(panel, A.buttons[i], 24, -275 - (i - 1) * 35)
-            row.button = Button(panel, "", 228, 104, -267 - (i - 1) * 35, function() OpenPicker(i) end)
+            row.label = Text(panel, A.buttons[i], 24, -305 - (i - 1) * 33)
+            row.button = Button(panel, "", 228, 104, -297 - (i - 1) * 33, function() OpenPicker(i) end)
             row.button.label:SetJustifyH("LEFT")
             panel.rows[i] = row
         end
-        Button(panel, "Reset all bindings", 155, 24, -462, function()
+        Button(panel, "Reset all bindings", 155, 24, -476, function()
             A.ResetBindings()
             OpenPicker(selectedButton)
         end)
