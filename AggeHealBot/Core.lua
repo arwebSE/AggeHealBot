@@ -103,16 +103,30 @@ local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
     local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
-    if not (normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
+    if not (frame == A.targetButton or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
         or name:match("^PartyFrameMemberFrame%d+$") or name:match("^CompactPartyFrameMember%d+$")
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
 end
+local function AuraQueryRestricted(predicate, ...)
+    if not predicate then return false end
+    local ok, restricted = pcall(predicate, ...)
+    -- A failed/unknown secrecy query is not permission to inspect auras.
+    if not ok or secret(restricted) then return true end
+    return restricted ~= false
+end
 local function HelpfulAuras(unit)
+    if InCombatLockdown() or not C_UnitAuras or not C_UnitAuras.GetAuraDataByIndex
+        or AuraQueryRestricted(C_Secrets and C_Secrets.ShouldAurasBeSecret) then return end
     local present, evidence = {}, {}
     for i = 1, 80 do
-        local aura = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
+        if AuraQueryRestricted(C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret, unit, i, "HELPFUL") then return end
+        -- Access itself can be denied before an aura is returned, including
+        -- when restrictions change during a scan. Discard partial evidence.
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+        if not ok or secret(aura) then return end
         if not aura then break end
+        if type(aura) ~= "table" then return end
         -- Forever can restrict aura data. Unknown data must never select a buff.
         if secret(aura.name) or secret(aura.spellId) then return end
         if aura.name then present[aura.name] = true end
@@ -188,15 +202,16 @@ local function HealOutOfRange(spell, unit)
     -- can return nil. The explicit-target macro still prevents a target cursor.
     return result == false or result == 0
 end
-local function CastMacro(spell, combatSpell)
+local function CastMacro(spell, combatSpell, explicitUnit)
     if not spell then return "nil" end
+    local target = explicitUnit or "mouseover"
     -- The cursor is on this unit frame. No target/player fallback clause.
     -- Secure cleanup also works in combat, when addon range checks cannot run.
     if combatSpell and combatSpell ~= spell then
-        return "/cast [combat,@mouseover,help,nodead] " .. combatSpell
-            .. "; [nocombat,@mouseover,help,nodead] " .. spell .. "\n/stopspelltarget"
+        return "/cast [combat,@" .. target .. ",help,nodead] " .. combatSpell
+            .. "; [nocombat,@" .. target .. ",help,nodead] " .. spell .. "\n/stopspelltarget"
     end
-    return "/cast [@mouseover,help,nodead] " .. spell .. "\n/stopspelltarget"
+    return "/cast [@" .. target .. ",help,nodead] " .. spell .. "\n/stopspelltarget"
 end
 local function MenuButton(frame)
     local state = frames[frame]
@@ -230,6 +245,7 @@ local function ShowFrameTooltip(frame)
     local state = frames[frame]
     if not state or not GameTooltip then return end
     local portrait = frame == PlayerFrame and AggeHealBotDB.playerFrame
+    local unit = Unit(frame)
     -- Use an addon-owned tooltip for every supported unit frame. SetUnit would
     -- enable automatic unit-data refreshes that can replace custom lines.
     if not addonTooltip then
@@ -238,25 +254,43 @@ local function ShowFrameTooltip(frame)
         addonTooltip:SetFrameLevel(100)
         addonTooltip:EnableMouse(false)
     end
-    if GameTooltip:IsOwned(frame) then
+    if portrait and GameTooltip:IsOwned(frame) then
         GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
         GameTooltip:Hide()
+    elseif not portrait and unit then
+        -- Leave Blizzard's unit details intact, including its normal live
+        -- refreshes; our binding information lives in a separate panel.
+        if not GameTooltip:IsOwned(frame) then
+            GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+            GameTooltip:SetUnit(unit)
+        end
+        GameTooltip:Show()
     end
     local tooltip = addonTooltip
     tooltip:SetOwner(frame, "ANCHOR_RIGHT")
+    tooltip:SetClampedToScreen(true)
+    local name = unit and UnitName and UnitName(unit)
+    if secret(name) or type(name) ~= "string" then name = "Unit" end
+    tooltip:ClearLines()
+    tooltip:AddDoubleLine(name, "AggeHealBot", 1, 0.82, 0, 0.5, 1, 0.7)
+    local heading = _G.AggeHealBotTooltipTextLeft1
+    local label = _G.AggeHealBotTooltipTextRight1
+    if heading and GameTooltipHeaderText then
+        heading:SetFontObject(GameTooltipHeaderText)
+        heading:SetTextColor(1, 0.82, 0)
+    end
+    if label and GameFontHighlightSmall then
+        label:SetFontObject(GameFontHighlightSmall)
+        label:SetTextColor(0.5, 1, 0.7)
+    end
     local shiftOnly = IsShiftKeyDown and IsShiftKeyDown()
         and not (IsControlKeyDown and IsControlKeyDown())
         and not (IsAltKeyDown and IsAltKeyDown())
-    if portrait and shiftOnly then
-        tooltip:SetText("AggeHealBot", 0.5, 1, 0.7)
+    if (portrait or frame == A.targetButton) and shiftOnly then
         tooltip:AddLine("Shift + Left Click to open AggeHealBot Menu.", 1, 1, 1)
         tooltip:Show()
         return
     end
-    local unit = Unit(frame)
-    tooltip:SetText("AggeHealBot", 0.5, 1, 0.7)
-    local name = unit and UnitName and UnitName(unit)
-    if not secret(name) and type(name) == "string" then tooltip:AddLine(name, 1, 1, 1) end
     if not InCombatLockdown() and state.nextBuff then
         tooltip:AddLine("Next left click: " .. state.nextBuff, 0.65, 1, 0.65)
     elseif not InCombatLockdown() and state.blockedBuff then
@@ -316,7 +350,7 @@ local function Apply(frame)
     for _, b in ipairs(bindings) do
         -- A portrait-only shortcut; party/raid frames retain the user's spell
         -- bindings. Install it before combat through the existing click delegate.
-        local bindingAction = frame == PlayerFrame and b.prefix == "shift-" and b.button == 1
+        local bindingAction = (frame == PlayerFrame or frame == A.targetButton) and b.prefix == "shift-" and b.button == 1
             and "settings" or b.action
         local key = b.prefix .. "type" .. b.button
         local plainLeft = b.prefix == "" and b.button == 1
@@ -346,7 +380,7 @@ local function Apply(frame)
         end
         if not (b.prefix == "" and b.button == 1) then
             Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
-            Set(frame, b.prefix .. "macrotext" .. b.button, bindingAction == "spell" and b.spell and CastMacro(b.spell) or nil)
+            Set(frame, b.prefix .. "macrotext" .. b.button, bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, frame == A.targetButton and "target" or nil) or nil)
         end
     end
     local heal, left
@@ -372,7 +406,7 @@ local function Apply(frame)
     -- Never pass macro commands through SecureCmdOptionParse/state drivers:
     -- they parse slash commands and can strip /cast from the payload.
     -- Keep the complete macro intact; its own conditions select combat healing.
-    Set(frame, "macrotext1", (buff or heal) and CastMacro(buff or heal, heal) or nil)
+    Set(frame, "macrotext1", (buff or heal) and CastMacro(buff or heal, heal, frame == A.targetButton and "target" or nil) or nil)
     local action = (left.action == "settings" or left.action == "togglemenu") and "click" or left.action
     if action == "spell" then action = heal and "macro" or "none" end
     local healBlocked = left.action == "spell" and heal and not buff and HealOutOfRange(heal, Unit(frame))
@@ -404,9 +438,40 @@ local function HookFunctions()
         hooks.normalPartyFrames = true
     end
 end
+local function RegisterTargetFrame()
+    if not TargetFrame then return end
+    if not A.targetButton then
+        -- A secure friendly-only click surface leaves the stock target button
+        -- and enemy interactions intact, including target switches in combat.
+        local button = CreateFrame("Button", "AggeHealBotTargetButton", TargetFrame, "SecureUnitButtonTemplate")
+        button:SetAllPoints(TargetFrame)
+        local level = TargetFrame:GetFrameLevel()
+        if not secret(level) then button:SetFrameLevel(level + 1) end
+        button:EnableMouse(true)
+        button.unit = "target"
+        button:SetAttribute("unit", "target")
+        button:SetAttribute("menu-function", function(_, unit, mouseButton)
+            local menu = TargetFrame:GetAttribute("menu-function")
+            if type(menu) == "function" then menu(TargetFrame, unit, mouseButton)
+            elseif CompactUnitFrame_OpenMenu then CompactUnitFrame_OpenMenu(TargetFrame, unit, mouseButton) end
+        end)
+        button:HookScript("OnHide", function(self)
+            A.UpdateBuffIndicator(self)
+            if hoveredFrame == self then
+                hoveredFrame = nil
+                if addonTooltip and addonTooltip:IsOwned(self) then addonTooltip:Hide() end
+                if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+            end
+        end)
+        A.targetButton = button
+        RegisterStateDriver(button, "visibility", "[@target,exists,help] show; hide")
+    end
+    Register(A.targetButton)
+end
 discover = function()
     HookFunctions()
     Register(PlayerFrame)
+    RegisterTargetFrame()
     for i = 1, 5 do
         Register(_G["PartyMemberFrame" .. i])
         Register(_G["PartyFrameMemberFrame" .. i])
@@ -561,7 +626,7 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
@@ -578,10 +643,19 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         EnsureExplicitTargeting()
         BuildBindings()
         refresh()
-        -- Movement doesn't emit UNIT_AURA. Poll only range for pending buffs;
-        -- rescan auras/reapply bindings only when the range state changes.
+        -- Movement and secrecy transitions need not emit UNIT_AURA. Poll
+        -- access/range, rescanning only when either state changes.
+        local auraRestrictions = AuraQueryRestricted(C_Secrets and C_Secrets.ShouldAurasBeSecret)
         C_Timer.NewTicker(0.2, function()
             if InCombatLockdown() then return end
+            -- Secrecy can change without a combat/aura event. Clear stale
+            -- prompts on restriction and resume scanning when access returns.
+            local restricted = AuraQueryRestricted(C_Secrets and C_Secrets.ShouldAurasBeSecret)
+            if restricted ~= auraRestrictions then
+                auraRestrictions = restricted
+                Queue()
+                return
+            end
             for frame, state in pairs(frames) do
                 if state.candidateBuff then
                     local blocked = not BuffInRange(state.candidateBuff, Unit(frame))
@@ -594,6 +668,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         end)
         Print("v" .. A.version .. " loaded. /ahb for bindings and settings.")
     elseif ready then
+        if event == "PLAYER_TARGET_CHANGED" and A.targetButton then
+            -- Never leave a previous target's badge/evidence on the new one.
+            pendingBuffAttempt = nil
+            A.UpdateBuffIndicator(A.targetButton)
+            if hoveredFrame == A.targetButton and addonTooltip then addonTooltip:Hide() end
+        end
         if event == "UI_ERROR_MESSAGE" then
             if not pendingBuffAttempt or InCombatLockdown() or secret(arg) or secret(message) then return end
             local attempt = pendingBuffAttempt
@@ -623,12 +703,6 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             pendingBuffAttempt = nil
             A.HideBuffIndicators()
             if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
-            -- Hide a precombat tooltip rather than leave an obsolete buff hint up.
-            if GameTooltip then
-                for frame in pairs(frames) do
-                    if GameTooltip:IsOwned(frame) then GameTooltip:Hide(); break end
-                end
-            end
             return
         end
         if event == "SPELLS_CHANGED" then

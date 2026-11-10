@@ -2,7 +2,7 @@
 
 **[Download on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest)
 
-Click-to-heal on Blizzard party and raid frames in **WoW Forever**.
+Click-to-heal on Blizzard party, raid and friendly target frames in **WoW Forever**.
 
 <img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 

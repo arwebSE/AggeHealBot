@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2 — 2026-11-10
+
+- Support click healing and buff watching on the stock friendly target frame, including a mirrored portrait/level outline, external buff icon and Shift + left-click settings shortcut.
+- Keep enemy target interactions untouched through a secure friendly-only click surface, including target changes during combat.
+- Check aura secrecy before scanning and safely handle aura API calls that are denied while addon code is tainted.
+- Discard incomplete or restricted aura scans, clear buff prompts and retain the normal healing binding until auras are readable again.
+- Detect aura-secrecy changes outside combat so buff reminders recover without requiring a reload or another aura event.
+- Preserve Blizzard's original teammate tooltip while keeping the persistent AggeHealBot binding tooltip beside the hovered unit frame.
+- Make the hovered player's name the large tooltip heading and place a smaller AggeHealBot label at the top right.
+
 ## 1.0.1 — 2026-11-09
 
 - Remove the mage utility preset and Arcane Intellect buff reminders; advertised presets now focus on druid, priest, paladin and shaman healers.

@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: AggeHealBot
-## Notes: Simple click healing on Blizzard party and raid frames.
+## Notes: Simple click healing on Blizzard party, raid and friendly target frames.
 ## Author: Agge
-## Version: 1.0.1
+## Version: 1.0.2
 ## IconTexture: Interface\Icons\Spell_Nature_HealingTouch
 ## X-Curse-Project-ID: 1792878
 ## SavedVariablesPerCharacter: AggeHealBotDB

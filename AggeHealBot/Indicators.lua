@@ -16,7 +16,7 @@ end
 
 -- A continuous alpha mask avoids the clipped dashes produced by rotating small
 -- solid-color textures. All pieces share one pulse and one stroke profile.
-local function CreatePlayerGlow(host, portrait, health, mana)
+local function CreatePlayerGlow(host, portrait, health, mana, mirrored)
     local glow = {}
     local overlay = CreateFrame("Frame", nil, host)
     overlay:SetFrameLevel(host:GetFrameLevel() + 10)
@@ -26,6 +26,7 @@ local function CreatePlayerGlow(host, portrait, health, mana)
     local function piece(asset)
         local texture = overlay:CreateTexture(nil, "OVERLAY", nil, 7)
         texture:SetTexture(media .. asset, "CLAMP", "CLAMP")
+        if mirrored then texture:SetTexCoord(1, 0, 0, 1) end
         glow[#glow + 1] = {texture = texture, alpha = 1, asset = true}
         return texture
     end
@@ -38,7 +39,6 @@ local function CreatePlayerGlow(host, portrait, health, mana)
     -- Let the UI resolve the bar's right edge. Its screen coordinates can be
     -- secret even outside combat, so Lua must never read or subtract them.
     local rightGuide = overlay:CreateTexture(nil, "OVERLAY")
-    rightGuide:SetHeight(1)
     local function layout()
         local width = publicNumber(portrait:GetWidth())
         local height = publicNumber(portrait:GetHeight())
@@ -47,21 +47,26 @@ local function CreatePlayerGlow(host, portrait, health, mana)
         if not width or not height then return end
         local scale = (height + 16) / 112
         local capWidth = 32 * scale
-        glow.badgeOffsetY = -30 * scale
+        glow.badgeOffsetY = mirrored and 0 or -30 * scale
         -- Expanded transparent margins keep the blur intact on every side,
         -- without moving the established portrait, level or panel contours.
         local paddedTop = 8 + 8 * scale
-        arc:SetPoint("TOPLEFT", portrait, "TOPLEFT", -8 - (width + 16) * 16 / 112, paddedTop)
+        local extension = 8 + (width + 16) * 16 / 112
+        arc:SetPoint(mirrored and "TOPRIGHT" or "TOPLEFT", portrait, mirrored and "TOPRIGHT" or "TOPLEFT", mirrored and extension or -extension, paddedTop)
         arc:SetSize((width + 16) * 128 / 112, (height + 16) * 144 / 112)
-        rightGuide:SetPoint("TOPLEFT", arc, "TOPLEFT")
-        rightGuide:SetPoint("TOPRIGHT", health, "TOPRIGHT", 1, 0)
-        cap:SetPoint("TOP", rightGuide, "TOPRIGHT")
+        rightGuide:SetPoint(mirrored and "TOPRIGHT" or "TOPLEFT", arc, mirrored and "TOPRIGHT" or "TOPLEFT")
+        -- Opposite corners keep the guide's top on the portrait and its
+        -- bottom on the health bar. Two TOP anchors conflict when those
+        -- regions have different heights, displacing the mirrored panel.
+        rightGuide:SetPoint(mirrored and "BOTTOMLEFT" or "BOTTOMRIGHT", health, mirrored and "TOPLEFT" or "TOPRIGHT", mirrored and -1 or 1, 0)
+        cap:SetPoint("TOP", rightGuide, mirrored and "TOPLEFT" or "TOPRIGHT")
         cap:SetSize(capWidth, (height + 16) * 128 / 112)
-        middle:SetPoint("TOPLEFT", arc, "TOPRIGHT")
-        middle:SetPoint("BOTTOMRIGHT", cap, "BOTTOMLEFT")
+        middle:SetPoint(mirrored and "TOPRIGHT" or "TOPLEFT", arc, mirrored and "TOPLEFT" or "TOPRIGHT")
+        middle:SetPoint(mirrored and "BOTTOMLEFT" or "BOTTOMRIGHT", cap, mirrored and "BOTTOMRIGHT" or "BOTTOMLEFT")
     end
     glow.layout = layout
-    glow.badgeAnchor = cap
+    glow.badgeAnchor = mirrored and portrait or cap
+    glow.badgePoint = mirrored and "TOPRIGHT" or "TOP"
     layout()
 
     local pulse = overlay:CreateAnimationGroup()
@@ -160,7 +165,8 @@ function A.UpdateBuffIndicator(frame, spell, spellID)
         -- PlayerFrame's health bar is a nested status bar; parent the outline
         -- to the whole portrait so the pulse frames its name and both bars.
         local isPlayerFrame = frame == PlayerFrame
-        local host = isPlayerFrame and frame
+        local isTargetFrame = frame == A.targetButton
+        local host = (isPlayerFrame or isTargetFrame) and frame
             or frame.healthBar or frame.healthbar or frame.HealthBar or frame
         view.background = frame:CreateTexture(nil, "OVERLAY", nil, 5)
         view.background:SetColorTexture(0.04, 0.08, 0.04, 0.9)
@@ -175,9 +181,15 @@ function A.UpdateBuffIndicator(frame, spell, spellID)
             playerPortrait = frame.portrait or _G.PlayerFramePortrait
             playerHealth = frame.healthbar or frame.healthBar or _G.PlayerFrameHealthBar
             playerMana = frame.manabar or frame.manaBar or _G.PlayerFrameManaBar
+        elseif isTargetFrame then
+            local content = TargetFrame.TargetFrameContent and TargetFrame.TargetFrameContent.TargetFrameContentMain
+            playerPortrait = TargetFrame.GetPortrait and TargetFrame:GetPortrait() or TargetFrame.portrait or _G.TargetFramePortrait
+            playerHealth = TargetFrame.healthbar or TargetFrame.healthBar
+                or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar)
+            playerMana = TargetFrame.manabar or TargetFrame.manaBar or (content and content.ManaBar)
         end
         view.glow = playerPortrait and playerHealth and playerMana
-            and CreatePlayerGlow(host, playerPortrait, playerHealth, playerMana)
+            and CreatePlayerGlow(host, playerPortrait, playerHealth, playerMana, isTargetFrame)
             or CreateGlow(host, frame)
         indicators[frame] = view
     end
@@ -190,7 +202,7 @@ function A.UpdateBuffIndicator(frame, spell, spellID)
         -- Account for the cap's transparent blur padding, keeping a three-unit
         -- gap outside the visible panel corner rather than PlayerFrame bounds.
         view.background:ClearAllPoints()
-        view.background:SetPoint("TOPLEFT", view.glow.badgeAnchor, "TOP", 3, view.glow.badgeOffsetY)
+        view.background:SetPoint("TOPLEFT", view.glow.badgeAnchor, view.glow.badgePoint, 3, view.glow.badgeOffsetY)
     end
     view.background:Show()
     view.icon:Show()

@@ -67,6 +67,10 @@ function CreateFrame(_, name, parent, template)
     function f:CreateTexture() local r = Region(); self.regions[#self.regions + 1] = r; return r end
     function f:CreateFontString() local r = Region(); self.regions[#self.regions + 1] = r; return r end
     function f:GetName() return self.name end
+    function f:GetFrameLevel() return self.frameLevel or 1 end
+    function f:SetFrameLevel(level) self.frameLevel = level end
+    function f:SetAllPoints(relative) self.allPoints = relative end
+    function f:EnableMouse() end
     function f:GetAttribute(k) return self.attrs[k] end
     function f:SetAttribute(k, v) assert(not combat, "protected write in combat"); self.attrs[k] = v end
     function f:RegisterForClicks(...) assert(not combat); self.clicks = {...} end
@@ -404,12 +408,25 @@ CreateFrame = function(kind, name, parent, template)
         f.Bg = Region()
     end
     if template == "GameTooltipTemplate" then
+        for _, side in ipairs({"Left", "Right"}) do
+            _G[name .. "Text" .. side .. "1"] = {
+                SetFontObject = function(self, font) self.fontObject = font end,
+                SetTextColor = function() end,
+            }
+        end
+        function f:SetPoint(...) self.anchor = {...} end
+        function f:ClearAllPoints() self.anchor = nil end
         function f:SetFrameLevel() end
-        function f:SetOwner(owner) self.owner, self.lines = owner, {} end
+        function f:SetOwner(owner, anchor) self.owner, self.ownerAnchor, self.lines, self.anchor = owner, anchor, {}, nil end
+        function f:ClearLines() self.lines, self.doubleLines = {}, {} end
         function f:IsOwned(owner) return self.owner == owner end
         function f:SetText(text) self.lines = {text} end
         function f:AddLine(text) self.lines[#self.lines + 1] = text end
-        function f:AddDoubleLine(left, right) self.lines[#self.lines + 1] = left .. right end
+        function f:AddDoubleLine(left, right)
+            self.lines[#self.lines + 1] = left .. right
+            self.doubleLines = self.doubleLines or {}
+            self.doubleLines[#self.doubleLines + 1] = {left, right}
+        end
     end
     return f
 end
@@ -517,6 +534,7 @@ assert(not AggeHealBotSettings.shown, "preinstalled portrait shortcut works in c
 combat = false
 
 local shiftHeld, ctrlHeld = true, false
+GameTooltipHeaderText, GameFontHighlightSmall = {}, {}
 IsShiftKeyDown = function() return shiftHeld end
 IsControlKeyDown = function() return ctrlHeld end
 IsAltKeyDown = function() return false end
@@ -574,13 +592,17 @@ shiftHeld = false
 for _, frame in ipairs({normalParty, CompactRaidFrame1}) do
     GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
     frame.scripts.OnEnter(frame)
+    assert(GameTooltip.shown and GameTooltip:IsOwned(frame), "party/raid hover must preserve Blizzard's original unit tooltip")
     assert(AggeHealBotTooltip.shown and AggeHealBotTooltip:IsOwned(frame), "party/raid hover must own the persistent tooltip")
+    assert(AggeHealBotTooltip.ownerAnchor == "ANCHOR_RIGHT" and AggeHealBotTooltip.anchor == nil, "binding panel must remain beside the hovered unit frame, independently of Blizzard's tooltip")
     local count = #AggeHealBotTooltip.lines
-    assert(count > 2 and AggeHealBotTooltip.lines[2] == "Member " .. frame:GetAttribute("unit"), "persistent tooltip identifies the hovered member and includes bindings")
+    assert(count > 2 and AggeHealBotTooltip.doubleLines[1][1] == "Member " .. frame:GetAttribute("unit") and AggeHealBotTooltip.doubleLines[1][2] == "AggeHealBot", "tooltip heading must show the member's name on the left and addon label on the right")
+    assert(AggeHealBotTooltipTextLeft1.fontObject == GameTooltipHeaderText and AggeHealBotTooltipTextRight1.fontObject == GameFontHighlightSmall, "member name uses the large header font and addon label uses the small font")
     GameTooltip:SetUnit(frame:GetAttribute("unit"))
     GameTooltip:Hide()
     assert(AggeHealBotTooltip.shown and #AggeHealBotTooltip.lines == count, "stock refresh must not erase party/raid binding information")
     event("UNIT_AURA", frame:GetAttribute("unit"))
+    assert(GameTooltip.shown and GameTooltip:IsOwned(frame), "aura updates must keep the original tooltip available")
     assert(AggeHealBotTooltip.shown and #AggeHealBotTooltip.lines == count, "aura refresh must update the tooltip without duplicated rows")
     shiftHeld = true
     event("MODIFIER_STATE_CHANGED")
@@ -588,6 +610,7 @@ for _, frame in ipairs({normalParty, CompactRaidFrame1}) do
     shiftHeld = false
     frame.scripts.OnLeave(frame)
     assert(not AggeHealBotTooltip.shown, "party/raid tooltip must hide on leave")
+    assert(not GameTooltip.shown, "original tooltip must also hide on leave")
 end
 normalParty.scripts.OnEnter(normalParty)
 CompactRaidFrame1.scripts.OnEnter(CompactRaidFrame1)
@@ -595,3 +618,146 @@ normalParty.scripts.OnLeave(normalParty)
 assert(AggeHealBotTooltip.shown and AggeHealBotTooltip:IsOwned(CompactRaidFrame1), "late leave from previous frame must not hide the new member's tooltip")
 CompactRaidFrame1.scripts.OnLeave(CompactRaidFrame1)
 print("PASS: regular party and raid hover tooltips survive stock refreshes and aura updates, identify their member, and hide on leave")
+
+-- Aura access can be denied outside combat before any table is returned.
+local auraGetter = C_UnitAuras.GetAuraDataByIndex
+local globalRestriction, restrictedIndex, deniedIndex = false, nil, nil
+local reads, partyReads, restrictedReads = 0, 0, 0
+C_Secrets = {
+    ShouldAurasBeSecret = function() return globalRestriction end,
+    ShouldUnitAuraIndexBeSecret = function(unit, index)
+        return unit == "party1" and index == restrictedIndex
+    end,
+}
+C_UnitAuras.GetAuraDataByIndex = function(unit, index, filter)
+    reads = reads + 1
+    assert(not globalRestriction, "aura getter must not run while aura access is globally restricted")
+    if unit == "party1" then
+        partyReads = partyReads + 1
+        if index == restrictedIndex then restrictedReads = restrictedReads + 1 end
+        assert(index ~= restrictedIndex, "restricted aura index must not be queried")
+        if index == deniedIndex then error("Auras cannot be accessed when secret while tainted by 'AggeHealBot'") end
+    end
+    return auraGetter(unit, index, filter)
+end
+auras.party1, ranges.party1 = {}, true
+ns.SetOption("smartBuffs", true)
+assert(normalParty.attrs.spell1 == "Mark" and normalParty.regions[2].shown)
+reads, partyReads = 0, 0
+globalRestriction = true
+tickers[1]()
+assert(reads == 0, "secrecy changes must skip the aura getter even outside combat")
+assert(normalParty.attrs.spell1 == "Regrowth" and not normalParty.regions[2].shown, "new restrictions must clear stale buff prompts and restore healing")
+globalRestriction = false
+tickers[1]()
+assert(normalParty.attrs.spell1 == "Mark" and normalParty.regions[2].shown, "buff reminders must recover when secrecy clears without another aura event")
+
+auras.party1 = {{name = "Thorns"}}
+restrictedIndex, partyReads = 2, 0
+event("UNIT_AURA", "party1")
+assert(partyReads > 0 and restrictedReads == 0 and normalParty.attrs.spell1 == "Regrowth" and not normalParty.regions[2].shown, "a restricted index must discard the entire partial scan")
+restrictedIndex, deniedIndex = nil, 1
+event("UNIT_AURA", "party1")
+assert(normalParty.attrs.spell1 == "Regrowth" and not normalParty.regions[2].shown, "a denied API call must not be treated as an empty aura list")
+deniedIndex = 2
+event("UNIT_AURA", "party1")
+assert(normalParty.attrs.spell1 == "Regrowth" and not normalParty.regions[2].shown, "mid-scan API denial must not leave a partial buff decision")
+deniedIndex = nil
+C_Secrets.ShouldAurasBeSecret = function() error("secrecy unavailable") end
+reads = 0
+event("UNIT_AURA", "party1")
+assert(reads == 0 and normalParty.attrs.spell1 == "Regrowth", "failed secrecy checks must not permit an aura read")
+
+local previousSecretCheck = issecretvalue
+local secretAura = setmetatable({}, {__index = function() error("secret aura field access") end})
+issecretvalue = function(value) return value == secretAura end
+C_Secrets.ShouldAurasBeSecret = function() return secretAura end
+reads = 0
+event("UNIT_AURA", "party1")
+assert(reads == 0, "secret secrecy results must not permit an aura read")
+C_Secrets.ShouldAurasBeSecret = function() return false end
+C_UnitAuras.GetAuraDataByIndex = function(unit, index, filter)
+    if unit == "party1" then return secretAura end
+    return auraGetter(unit, index, filter)
+end
+event("UNIT_AURA", "party1")
+assert(normalParty.attrs.spell1 == "Regrowth" and not normalParty.regions[2].shown, "a secret aura table must not be inspected")
+issecretvalue = previousSecretCheck
+C_Secrets = nil
+C_UnitAuras.GetAuraDataByIndex = auraGetter
+auras.party1 = {}
+event("UNIT_AURA", "party1")
+assert(normalParty.attrs.spell1 == "Mark" and normalParty.regions[2].shown, "clients without secrecy predicates must still scan readable auras")
+print("PASS: out-of-combat aura secrecy, API denial, partial scans, secret aura tables, automatic recovery and legacy compatibility")
+
+local targetFriendly, targetExists = true, true
+local oldUnitCanAssist, oldUnitExists = UnitCanAssist, UnitExists
+UnitCanAssist = function(player, unit)
+    if unit == "target" then return targetFriendly end
+    return oldUnitCanAssist(player, unit)
+end
+UnitExists = function(unit)
+    if unit == "target" then return targetExists end
+    return oldUnitExists(unit)
+end
+local targetVisibility
+local function secureTargetVisibility()
+    if targetExists and targetFriendly then ns.targetButton:Show() else ns.targetButton:Hide() end
+end
+function RegisterStateDriver(frame, state, expression)
+    assert(not combat and frame == ns.targetButton and state == "visibility")
+    targetVisibility = expression
+    secureTargetVisibility()
+end
+TargetFrame = CreateFrame("Button", "TargetFrame")
+TargetFrame:SetAttribute("unit", "target")
+TargetFrame:SetAttribute("type1", "target")
+TargetFrame:SetAttribute("type2", "togglemenu")
+local targetMenus = 0
+TargetFrame:SetAttribute("menu-function", function(frame, unit)
+    assert(frame == TargetFrame and unit == "target")
+    targetMenus = targetMenus + 1
+end)
+auras.target, guids.target = {}, "friendly-A"
+event("GROUP_ROSTER_UPDATE")
+local targetButton = ns.targetButton
+assert(targetButton.parent == TargetFrame and targetButton.template == "SecureUnitButtonTemplate")
+assert(targetVisibility == "[@target,exists,help] show; hide" and targetButton.shown, "secure visibility must limit target clicks to friendly targets")
+assert(targetButton.attrs.spell1 == "Mark" and targetButton.regions[2].shown, "friendly targets get default buff priority and an icon")
+assert(TargetFrame.attrs.type1 == "target" and TargetFrame.attrs.type2 == "togglemenu", "native target bindings must remain untouched")
+assert(targetButton.attrs["shift-clickbutton1"] == ns.settingsButton, "target portrait gets the Shift-left menu shortcut")
+mouseEdge(targetButton, "Button4", true)
+assert(targetMenus == 1, "target menu binding must use the original target frame's menu")
+auras.target = {{name = "Mark"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Thorns", "target watcher advances through missing buffs")
+auras.target[2] = {name = "Thorns"}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Regrowth" and not targetButton.regions[2].shown, "fully buffed targets return to healing")
+auras.target, guids.target = {}, "friendly-B"
+event("PLAYER_TARGET_CHANGED")
+assert(targetButton.attrs.spell1 == "Mark" and targetButton.regions[2].shown, "switching friendly targets must refresh the watcher")
+local targetCombatMacro = targetButton.attrs.macrotext1
+assert(targetCombatMacro:find("combat,@target,help,nodead", 1, true) and targetCombatMacro:find("Regrowth", 1, true), "combat must heal the explicit friendly target instead of casting the pending buff")
+combat = true
+event("PLAYER_REGEN_DISABLED")
+targetFriendly = false
+secureTargetVisibility()
+event("PLAYER_TARGET_CHANGED")
+assert(not targetButton.shown and not targetButton.regions[2].shown, "hostile target switches in combat must hide the click surface and badge")
+assert(TargetFrame.attrs.type1 == "target" and TargetFrame.attrs.type2 == "togglemenu")
+targetFriendly = true
+secureTargetVisibility()
+event("PLAYER_TARGET_CHANGED")
+assert(targetButton.shown and targetButton.attrs.macrotext1 == targetCombatMacro, "friendly target switches in combat must reuse preinstalled secure healing bindings")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+ranges.target = false
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.type1 == "none" and not targetButton.regions[2].shown, "target buffs must respect range guards")
+ranges.target = true
+targetExists = false
+secureTargetVisibility()
+event("PLAYER_TARGET_CHANGED")
+assert(not targetButton.shown and not targetButton.regions[2].shown, "clearing target must clear the indicator")
+print("PASS: friendly target bindings, buffs, native menus, range guards, target switching and secure enemy pass-through during combat")
