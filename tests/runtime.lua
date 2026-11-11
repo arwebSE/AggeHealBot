@@ -21,6 +21,7 @@ for id, name in pairs(known) do spellNames[id] = name end
 function wipe(t) for k in pairs(t) do t[k] = nil end end
 function InCombatLockdown() return combat end
 function UnitClass() return "Druid", "DRUID" end
+function UnitIsPlayer() return true end
 function UnitExists(u) return u ~= nil end
 function UnitCanAssist() return true end
 function UnitIsDeadOrGhost() return false end
@@ -71,6 +72,7 @@ function CreateFrame(_, name, parent, template)
     function f:SetFrameLevel(level) self.frameLevel = level end
     function f:SetAllPoints(relative) self.allPoints = relative end
     function f:EnableMouse() end
+    function f:SetHitRectInsets() end
     function f:GetAttribute(k) return self.attrs[k] end
     function f:SetAttribute(k, v) assert(not combat, "protected write in combat"); self.attrs[k] = v end
     function f:RegisterForClicks(...) assert(not combat); self.clicks = {...} end
@@ -105,7 +107,7 @@ local function mouseEdge(frame, button, down, prefix)
     local registered = false
     for _, edge in ipairs(frame.clicks or {}) do if edge == wanted then registered = true end end
     if not registered then return end
-    local suffix = button == "LeftButton" and "1" or button:match("^Button(%d+)$")
+    local suffix = button == "LeftButton" and "1" or button == "RightButton" and "2" or button:match("^Button(%d+)$")
     prefix = prefix or ""
     if suffix and frame.attrs[prefix .. "type" .. suffix] == "click" then
         local delegate = frame.attrs[prefix .. "clickbutton" .. suffix]
@@ -124,9 +126,11 @@ assert(messages[#messages]:find("v" .. ns.version .. " loaded", 1, true), "login
 assert(cvars.autoSelfCast == "0", "disable client self-cast fallback for heals and buffs")
 assert(AggeHealBotDB.smartBuffs == true)
 assert(AggeHealBotDB.targetFrame == true, "target support must default on for existing saved settings without the new option")
-assert(AggeHealBotDB.playerFrame == false, "portrait support defaults off")
-assert(not drivers[PlayerFrame], "portrait untouched by default")
+assert(AggeHealBotDB.playerFrame == true, "portrait support defaults on")
+assert(drivers[PlayerFrame].spell1, "portrait is registered by default")
 ns.SetOption("playerFrame", true)
+assert(AggeHealBotDB.rightClickMenu == false and PlayerFrame.attrs.spell2 == "Healing Touch", "plain right-click must use the assigned heal by default")
+ns.SetOption("rightClickMenu", false)
 assert(#PlayerFrame.clicks == 1 and PlayerFrame.clicks[1] == "AnyDown", "clicks run once on press")
 assert(PlayerFrame.attrs.spell1 == "Mark", "first missing buff")
 assert(PlayerFrame.regions[2].shown and PlayerFrame.regions[2].texture == 101126, "Mark icon shown")
@@ -389,6 +393,8 @@ CreateFrame = function(kind, name, parent, template)
     end
     function f:GetText() return self.text or "" end
     function f:SetChecked(v) self.checked = v end
+    function f:SetEnabled(value) self.enabled = value end
+    function f:SetAlpha(value) self.alpha = value end
     function f:GetChecked() return self.checked end
     function f:Show() self.shown = true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
     function f:IsShown() return self.shown end
@@ -478,7 +484,7 @@ SlashCmdList.AGGEHEALBOT("")
 AggeHealBotSettings.player:SetChecked(false)
 AggeHealBotSettings.player.scripts.OnClick(AggeHealBotSettings.player)
 assert(not AggeHealBotDB.playerFrame and PlayerFrame.attrs.spell2 == nil)
-assert(AggeHealBotDB.hideRaidControls == false, "stock raid controls visible by default")
+assert(AggeHealBotDB.hideRaidControls == true, "raid controls hidden by default")
 CompactRaidFrameManager = CreateFrame("Frame")
 CompactRaidFrameManager:Show()
 function CompactRaidFrameManager_UpdateShown() CompactRaidFrameManager:Show() end
@@ -535,6 +541,7 @@ assert(not AggeHealBotSettings.shown, "preinstalled portrait shortcut works in c
 combat = false
 
 local shiftHeld, ctrlHeld = true, false
+manager:CloseMenus()
 GameTooltipHeaderText, GameFontHighlightSmall = {}, {}
 IsShiftKeyDown = function() return shiftHeld end
 IsControlKeyDown = function() return ctrlHeld end
@@ -553,6 +560,8 @@ function GameTooltip:Show() self.shown = true end
 function GameTooltip:Hide() self.shown = false end
 PlayerFrame.scripts.OnEnter(PlayerFrame)
 local shortcutTooltip = AggeHealBotTooltip
+assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "self portrait must show Blizzard's original tooltip alongside the Shift hint")
+assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and shortcutTooltip.ownerAnchor == "ANCHOR_RIGHT", "self portrait must use the shared native-tooltip position and keep addon information beside the frame")
 assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.")
 -- Simulate the stock unit tooltip being rebuilt/faded by Blizzard after hover.
 GameTooltip:SetUnit("player")
@@ -561,6 +570,7 @@ assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click
 shiftHeld = false
 event("MODIFIER_STATE_CHANGED")
 assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and shortcutTooltip.lines[2] ~= "Shift + Left Click to open AggeHealBot Menu.", "releasing Shift must show the full persistent binding tooltip")
+assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "normal self hover must keep Blizzard's tooltip visible beside addon information")
 local normalTooltipLines = #shortcutTooltip.lines
 GameTooltip:SetOwner(PlayerFrame, "ANCHOR_RIGHT")
 GameTooltip:SetUnit("player")
@@ -827,3 +837,292 @@ targetButton.scripts.OnEnter(targetButton)
 assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and GameTooltip.owner == targetButton, "fallback must also place native details away from the frame-relative binding tooltip")
 targetButton.scripts.OnLeave(targetButton)
 print("PASS: original target tooltip uses the native default position while addon bindings remain next to the target frame")
+
+assert(ns.SaveBinding("", 2, "spell", "Rejuvenation"))
+AggeHealBotSettings.rightClickMenu:SetChecked(true)
+AggeHealBotSettings.rightClickMenu.scripts.OnClick(AggeHealBotSettings.rightClickMenu)
+local savedMenuAPI = Menu
+Menu = nil
+for _, frame in ipairs({PlayerFrame, normalParty, CompactRaidFrame1, targetButton}) do
+    if frame == PlayerFrame or frame == targetButton then
+    assert(frame.attrs.type2 == "click" and frame.attrs.spell2 == nil and frame.attrs.macrotext2 == nil,
+        "right-click override must replace the spell action on player/target frames")
+    assert(not drivers[frame].type2, "menu override must remove a prior spell/range driver")
+    local originalMenu, opened = frame:GetAttribute("menu-function"), 0
+    frame:SetAttribute("menu-function", function() opened = opened + 1 end)
+    mouseEdge(frame, "RightButton", true)
+    mouseEdge(frame, "RightButton", false)
+    assert(opened == 1, "right-click menu must execute once per press")
+    frame:SetAttribute("menu-function", originalMenu)
+    else
+        assert(frame.attrs.type2 == "macro" and frame.attrs.spell2 == "Rejuvenation" and frame.attrs.clickbutton2 == nil,
+            "party and raid frames must retain their assigned right-click spell even with the menu override enabled")
+    end
+end
+Menu = savedMenuAPI
+assert(PlayerFrame.attrs["ctrl-spell2"] == "Abolish Poison", "right-click override must preserve modifier spell bindings")
+normalParty.scripts.OnEnter(normalParty)
+local advertisesMenu = false
+for _, line in ipairs(AggeHealBotTooltip.lines) do if line == "RightUnit menu" then advertisesMenu = true end end
+assert(not advertisesMenu, "party tooltip must advertise its spell rather than the player/target menu override")
+normalParty.scripts.OnLeave(normalParty)
+combat = true
+ns.SetOption("rightClickMenu", false)
+assert(PlayerFrame.attrs.type2 == "click", "changing the override in combat must defer protected writes")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+for _, frame in ipairs({PlayerFrame, normalParty, CompactRaidFrame1, targetButton}) do
+    assert(frame.attrs.type2 == "macro" and frame.attrs.spell2 == "Rejuvenation" and frame.attrs.clickbutton2 == nil,
+        "turning off the menu override must restore the saved right-click spell")
+end
+event("ADDON_LOADED", "AggeHealBot")
+assert(AggeHealBotDB.rightClickMenu == false, "saved right-click override opt-out must persist")
+print("PASS: optional right-click menu override, all supported frames, saved spells, modifiers, tooltip accuracy and combat deferral")
+
+local deadUnits, incoming = {}, {}
+local normalResLearned = false
+local oldBookItem = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(slot, bank)
+    if slot == 5 and not normalResLearned then return nil end
+    return oldBookItem(slot, bank)
+end
+known[50769] = nil
+UnitIsDeadOrGhost = function(unit) return deadUnits[unit] == true end
+UnitIsPlayer = function() return true end
+UnitHasIncomingResurrection = function(unit) return incoming[unit] == true end
+known[20484], spellNames[20484] = "Rebirth", "Rebirth"
+assert(AggeHealBotDB.combatResurrection == false and AggeHealBotDB.cureWatch == true)
+deadUnits.target = true
+event("SPELLS_CHANGED")
+assert(not targetButton.regions[2].shown and not targetButton.attrs.macrotext1:find("Rebirth", 1, true), "reagent resurrection must not be selected by default")
+known[50769], spellNames[50769] = "Revive", "Revive"
+normalResLearned = true
+event("SPELLS_CHANGED")
+assert(targetButton.attrs.spell1 == "Revive" and targetButton.regions[2].shown, "dead friendly target gets reagent-free resurrection priority")
+assert(targetButton.attrs.macrotext1:find("[nocombat,@target,help,dead] Revive", 1, true), "resurrection must use a dead-target condition")
+assert(not targetButton.attrs.macrotext1:find("help,nodead] Revive", 1, true), "resurrection must never be attempted on a living target")
+assert(not targetButton.attrs.macrotext1:find("Rebirth", 1, true))
+local resColor = targetButton.regions[3].color
+assert(resColor[1] == 0.65 and resColor[3] == 1, "resurrection uses its special pale-blue glow")
+incoming.target = true
+event("INCOMING_RESURRECT_CHANGED", "target")
+assert(not targetButton.regions[2].shown and not targetButton.attrs.macrotext1:find("help,dead] Revive", 1, true), "incoming resurrection must suppress duplicate offers")
+incoming.target = false
+ranges.target = false
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.type1 == "none" and not targetButton.regions[2].shown, "out-of-range resurrection must be blocked")
+ranges.target = true
+deadUnits.target = false
+event("UNIT_HEALTH", "target")
+assert(targetButton.attrs.spell1 == "Mark", "living target returns to missing buffs")
+ns.SetOption("combatResurrection", true)
+assert(targetButton.attrs.macrotext1:find("[combat,@target,help,dead,party] Rebirth", 1, true), "combat resurrection must require explicit opt-in and a group member")
+assert(drivers[targetButton]["ahb-resurrection"]:find("dead", 1, true), "combat glow must be driven by secure dead-unit conditions")
+combat = true
+event("PLAYER_REGEN_DISABLED")
+targetButton.scripts.OnAttributeChanged(targetButton, "ahb-resurrection", "combat")
+assert(targetButton.regions[2].shown and targetButton.regions[2].texture == 120484, "secure combat-resurrection state must show its spell icon")
+targetButton.scripts.OnAttributeChanged(targetButton, "ahb-resurrection", "none")
+assert(not targetButton.regions[2].shown, "combat resurrection glow must clear when the secure condition clears")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+ns.SetOption("combatResurrection", false)
+assert(not targetButton.attrs.macrotext1:find("Rebirth", 1, true) and not drivers[targetButton]["ahb-resurrection"])
+
+local harmful = {}
+local normalAuraGetter = C_UnitAuras.GetAuraDataByIndex
+C_UnitAuras.GetAuraDataByIndex = function(unit, index, filter)
+    if filter == "HARMFUL" then return harmful[unit] and harmful[unit][index] end
+    return normalAuraGetter(unit, index, filter)
+end
+harmful.target = {{name = "Hex", dispelName = "Curse"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Remove Curse", "a learned matching cure takes priority over missing buffs")
+assert(targetButton.regions[3].color[1] == 1 and targetButton.regions[3].color[2] == 0.3, "cure watch uses its special red glow")
+targetButton.scripts.OnEnter(targetButton)
+local sawDebuff = false
+for _, line in ipairs(AggeHealBotTooltip.lines) do if line == "Hex" then sawDebuff = true end end
+assert(sawDebuff, "tooltip identifies the debuff being cured")
+harmful.target = {{name = "Venom", dispelName = "Poison"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Abolish Poison", "poison must select a learned poison cure")
+harmful.target = {{name = "Fever", dispelName = "Disease"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Mark", "uncurable debuffs must not replace the heal/buff binding")
+harmful.target = {{name = "Hex", dispelName = "Curse"}}
+deadUnits.target = true
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Revive", "resurrection must take priority over a debuff")
+deadUnits.target = false
+ns.SetOption("cureWatch", false)
+assert(targetButton.attrs.spell1 == "Mark", "cure-watch opt-out must preserve normal buff priority")
+ns.SetOption("cureWatch", true)
+assert(targetButton.attrs.spell1 == "Remove Curse")
+C_Secrets = {ShouldAurasBeSecret = function() return true end}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Regrowth" and not targetButton.regions[2].shown, "restricted aura data must never select a cure or buff")
+C_Secrets = nil
+harmful.target = {}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Mark", "cleared debuff returns to normal priority")
+print("PASS: reagent-free resurrection, incoming resurrection, range, secure combat opt-in, learned matching cures, priority, colors and aura restrictions")
+
+assert(AggeHealBotDB.watchNPCs == nil, "NPC watch setting must be removed")
+local npcUnits = {target = true, party1 = true}
+UnitIsPlayer = function(unit) return not npcUnits[unit] end
+local npcAuraReads = 0
+local filteredAuraGetter = C_UnitAuras.GetAuraDataByIndex
+C_UnitAuras.GetAuraDataByIndex = function(unit, index, filter)
+    if npcUnits[unit] then npcAuraReads = npcAuraReads + 1 end
+    return filteredAuraGetter(unit, index, filter)
+end
+harmful.target, harmful.party1 = {{name = "Hex", dispelName = "Curse"}}, {{name = "Hex", dispelName = "Curse"}}
+event("UNIT_AURA", "target")
+for _, frame in ipairs({targetButton, normalParty}) do
+    assert(frame.attrs.spell1 == "Regrowth" and frame.attrs.type1 == "macro", "friendly NPCs retain normal healing bindings")
+    assert(not frame.regions[2].shown, "NPCs must not get cure/buff indicators by default")
+end
+assert(npcAuraReads == 0, "player-only scope must skip NPC aura scans altogether")
+deadUnits.target = true
+event("UNIT_HEALTH", "target")
+assert(not targetButton.regions[2].shown and not targetButton.attrs.macrotext1:find("Revive", 1, true), "NPCs must not get automatic resurrection by default")
+AggeHealBotDB.watchNPCs = true -- Obsolete saved options must not enable NPC watches.
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Regrowth" and not targetButton.regions[2].shown, "obsolete NPC opt-in must not enable automatic watches")
+ns.ShowOptions()
+assert(AggeHealBotSettings.npcs == nil, "NPC watch checkbox must be removed")
+local previousIsSecret = issecretvalue
+local hiddenIdentity = {}
+issecretvalue = function(value) return value == hiddenIdentity end
+UnitIsPlayer = function(unit) return unit == "target" and hiddenIdentity or true end
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Regrowth" and not targetButton.regions[2].shown, "unknown player identity must not enable automatic watching")
+issecretvalue = previousIsSecret
+event("ADDON_LOADED", "AggeHealBot")
+assert(AggeHealBotDB.watchNPCs == nil, "obsolete NPC settings must be cleaned up")
+print("PASS: player-only watch defaults, no NPC scans, retained NPC healing, removed NPC opt-in and restricted identities")
+
+UnitIsPlayer = function() return true end
+deadUnits.target = false
+harmful.target = {{name = "Hex", dispelName = "Curse"}}
+event("UNIT_AURA", "target")
+assert(AggeHealBotDB.combatCures == true, "combat cure alerts must default on")
+ns.SetOption("combatCures", false)
+local combatCureMacro = targetButton.attrs.macrotext1
+combat = true
+event("PLAYER_REGEN_DISABLED")
+assert(not targetButton.regions[2].shown, "disabled combat cure alerts must stay hidden")
+AggeHealBotSettings.combatCures:SetChecked(true)
+AggeHealBotSettings.combatCures.scripts.OnClick(AggeHealBotSettings.combatCures)
+assert(targetButton.regions[2].shown and targetButton.regions[3].color[1] == 1, "combat cure opt-in shows a readable matching cure alert")
+assert(targetButton.attrs.macrotext1 == combatCureMacro, "combat cure alerts must not change protected cast macros")
+targetButton.scripts.OnEnter(targetButton)
+local sawCombatBinding = false
+for _, line in ipairs(AggeHealBotTooltip.lines) do if line == "Cast with Ctrl + Left" then sawCombatBinding = true end end
+assert(sawCombatBinding, "combat cure tooltip must show the actual cure keybind")
+shiftHeld = true
+event("MODIFIER_STATE_CHANGED")
+assert(not targetButton.regions[2].shown, "modifier keys suppress the combat watch icon")
+shiftHeld = false
+event("MODIFIER_STATE_CHANGED")
+assert(targetButton.regions[2].shown)
+local restrictedCombatReads = 0
+local combatAuraGetter = C_UnitAuras.GetAuraDataByIndex
+C_Secrets = {ShouldAurasBeSecret = function() return true end}
+C_UnitAuras.GetAuraDataByIndex = function(...)
+    restrictedCombatReads = restrictedCombatReads + 1
+    return combatAuraGetter(...)
+end
+event("UNIT_AURA", "target")
+assert(not targetButton.regions[2].shown and restrictedCombatReads == 0, "combat cure watching must never read restricted auras")
+C_Secrets = nil
+event("UNIT_AURA", "target")
+assert(targetButton.regions[2].shown, "readable combat alerts must recover")
+UnitIsPlayer = function(unit) return unit ~= "target" end
+event("UNIT_AURA", "target")
+assert(not targetButton.regions[2].shown, "combat cure alerts must also exclude NPCs")
+UnitIsPlayer = function() return true end
+ns.SetOption("combatCures", false)
+assert(not targetButton.regions[2].shown and targetButton.attrs.macrotext1 == combatCureMacro)
+combat = false
+event("PLAYER_REGEN_ENABLED")
+print("PASS: default-on combat cure alerts, readable aura controls, existing binding hints, restricted data, NPC exclusion and protected macro preservation")
+
+PlayerFrame.healthbar = CreateFrame("StatusBar")
+PlayerFrame.manabar = CreateFrame("StatusBar")
+event("GROUP_ROSTER_UPDATE")
+local healthRegion, manaRegion = PlayerFrame.healthbar, PlayerFrame.manabar
+GameTooltip:SetOwner(healthRegion, "ANCHOR_RIGHT")
+GameTooltip:SetText("Health")
+healthRegion.scripts.OnEnter(healthRegion)
+assert(AggeHealBotTooltip.shown and GameTooltip.lines[1] == "Health", "health hover must show addon information while preserving the resource tooltip")
+PlayerFrame.scripts.OnLeave(PlayerFrame)
+assert(AggeHealBotTooltip.shown, "a late parent leave must not hide a child hover tooltip")
+GameTooltip:SetOwner(manaRegion, "ANCHOR_RIGHT")
+GameTooltip:SetText("Mana")
+manaRegion.scripts.OnEnter(manaRegion)
+healthRegion.scripts.OnLeave(healthRegion)
+assert(AggeHealBotTooltip.shown and GameTooltip.lines[1] == "Mana", "moving between bars must preserve the active tooltip")
+mouseEdge(PlayerFrame, "Button4", true)
+assert(currentMenu and not AggeHealBotTooltip.shown, "opening the unit menu must hide the addon tooltip immediately")
+event("UNIT_AURA", "player")
+healthRegion.scripts.OnEnter(healthRegion)
+assert(not AggeHealBotTooltip.shown, "menu-open aura refreshes and child hover must not reopen the addon tooltip")
+manager:CloseMenus()
+healthRegion.scripts.OnEnter(healthRegion)
+assert(AggeHealBotTooltip.shown, "hovering after the menu closes restores the addon tooltip")
+healthRegion.scripts.OnLeave(healthRegion)
+assert(not AggeHealBotTooltip.shown)
+
+local savedRightBinding = AggeHealBotDB.bindings["2"]
+ns.SetOption("smartBuffs", false)
+ns.SetOption("cureWatch", false)
+ns.SetOption("combatCures", false)
+ns.SetOption("combatResurrection", true)
+ns.SetOption("rightClickMenu", true)
+ns.SetOption("targetFrame", false)
+ns.SetOption("hideRaidControls", false)
+AggeHealBotSettings.resetSettings.scripts.OnClick(AggeHealBotSettings.resetSettings)
+assert(AggeHealBotDB.smartBuffs and AggeHealBotDB.cureWatch and AggeHealBotDB.targetFrame)
+assert(AggeHealBotDB.playerFrame and AggeHealBotDB.combatCures and AggeHealBotDB.hideRaidControls
+    and not AggeHealBotDB.combatResurrection and not AggeHealBotDB.rightClickMenu, "reset button must restore all toggle defaults")
+assert(AggeHealBotDB.bindings["2"] == savedRightBinding and targetButton.attrs.spell2 == "Rejuvenation", "reset settings must preserve saved spell bindings")
+assert(AggeHealBotSettings.buffs:GetChecked() and not AggeHealBotSettings.rightClickMenu:GetChecked(), "reset must refresh checkbox states")
+ns.SetOption("targetFrame", false)
+combat = true
+ns.ResetOptions()
+assert(not targetButton.shown, "reset during combat must defer secure target enabling")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(targetButton.shown and AggeHealBotDB.targetFrame, "queued reset must apply secure changes after combat")
+print("PASS: resource-bar hover, native resource tooltip preservation, menu suppression, reset toggle defaults, saved bindings and combat deferral")
+
+AggeHealBotSettings.cures:SetChecked(false)
+AggeHealBotSettings.cures.scripts.OnClick(AggeHealBotSettings.cures)
+assert(not AggeHealBotSettings.combatCures.enabled and AggeHealBotSettings.combatCures.alpha < 1,
+    "combat cure control must be disabled and dimmed when Cure watcher is off")
+assert(AggeHealBotDB.combatCures, "disabling the parent should preserve the combat cure preference")
+AggeHealBotSettings.cures:SetChecked(true)
+AggeHealBotSettings.cures.scripts.OnClick(AggeHealBotSettings.cures)
+assert(AggeHealBotSettings.combatCures.enabled and AggeHealBotSettings.combatCures.alpha == 1
+    and AggeHealBotSettings.combatCures:GetChecked(), "enabling Cure watcher restores the combat control and its saved choice")
+
+-- Forever uses its own ranked Revive IDs, rather than the older 50769 spell.
+spellNames[437138], spellNames[1237948] = "Forever Revive", "Forever Revive"
+known[50769], known[1237948] = nil, "Forever Revive"
+local rankedBookItem = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(slot, bank)
+    if slot == 5 then return {spellID = 1237948} end
+    return rankedBookItem(slot, bank)
+end
+event("SPELLS_CHANGED")
+local foundForeverRevive, foundRebirth = false, false
+for _, choice in ipairs(ns.GetSpellChoices()) do
+    if choice.label == "Forever Revive" then foundForeverRevive = choice.category == "utility" end
+    if choice.label == "Rebirth" then foundRebirth = choice.category == "utility" end
+end
+assert(foundForeverRevive and foundRebirth, "Forever Revive and Rebirth must both be listed as Utility")
+deadUnits.target = true
+event("UNIT_HEALTH", "target")
+assert(targetButton.attrs.spell1 == "Forever Revive", "resurrection watch must recognize the learned Forever rank without the old spell ID")
+print("PASS: scoped player/target right-click menus and Forever-ranked Revive in Utility and resurrection watching")

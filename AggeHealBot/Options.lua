@@ -70,8 +70,14 @@ end
 local function Update()
     if not panel then return end
     panel.buffs:SetChecked(AggeHealBotDB.smartBuffs)
+    panel.cures:SetChecked(AggeHealBotDB.cureWatch)
+    panel.combatRes:SetChecked(AggeHealBotDB.combatResurrection)
+    panel.combatCures:SetChecked(AggeHealBotDB.combatCures)
+    panel.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
+    panel.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
+    panel.rightClickMenu:SetChecked(AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
@@ -260,42 +266,72 @@ function A.ShowOptions(host)
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, 450)
         divider:SetPoint("TOPLEFT", 349, -43)
-        local function Check(key, label, y)
+        local function Check(key, label, x, y, description)
             local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-            check:SetPoint("TOPLEFT", 18, y)
+            check:SetPoint("TOPLEFT", x, y)
+            -- Include the label in the hover/click area without stretching the
+            -- stock checkbox artwork or overlapping adjacent rows.
+            check:SetHitRectInsets(0, -124, 2, 2)
             local text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             text:SetPoint("LEFT", check, "RIGHT", 2, 0)
             text:SetText(label)
             check:SetScript("OnClick", function(self) A.SetOption(key, self:GetChecked()); Update() end)
+            check:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(label, 1, 0.82, 0)
+                GameTooltip:AddLine(description, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            local function HideTip(self)
+                if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+            end
+            check:SetScript("OnLeave", HideTip)
+            check:SetScript("OnHide", HideTip)
             return check
         end
-        panel.buffs = Check("smartBuffs", "Buff missing buffs outside combat", -37)
-        panel.player = Check("playerFrame", "Click-heal my player portrait", -67)
-        panel.target = Check("targetFrame", "Click-heal and watch buffs on my target", -97)
-        panel.raidControls = Check("hideRaidControls", "Hide Blizzard raid controls", -127)
-        Text(panel, "MODIFIERS — CLICK TO CHANGE", 24, -172, "GameFontHighlightSmall")
+        panel.buffs = Check("smartBuffs", "Buff watcher", 18, -37,
+            "Prioritize missing class buffs on plain left-click outside combat. The icon and glow show which buff will be cast next.")
+        panel.cures = Check("cureWatch", "Cure watcher", 18, -65,
+            "Prioritize a learned cure on plain left-click when a removable debuff is present. Runs outside combat while aura data is readable.")
+        panel.combatRes = Check("combatResurrection", "Combat resurrection", 182, -37,
+            "Include learned combat resurrection spells, such as Rebirth, in left-click priority for dead party or raid members. These spells may consume reagents. Off by default.")
+        panel.player = Check("playerFrame", "Player frame", 18, -93,
+            "Enable click healing and watch indicators on your own portrait. Shift + left-click opens the AggeHealBot menu.")
+        panel.target = Check("targetFrame", "Target frame", 182, -93,
+            "Enable click healing and watch indicators on the stock friendly target frame. Shift + left-click opens the AggeHealBot menu.")
+        panel.rightClickMenu = Check("rightClickMenu", "Right-click menu", 18, -121,
+            "Use plain right-click to open the unit menu on your player and target frames. Party and raid frames use their assigned bindings. Turn this off to also use your assigned right-click binding on player and target frames.")
+        panel.raidControls = Check("hideRaidControls", "Hide raid controls", 182, -121,
+            "Hide Blizzard's raid-control side panel and its tab. Your party and raid unit frames stay visible.")
+        panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,
+            "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat because combat bindings cannot change based on debuffs. On by default.")
+        Text(panel, "MODIFIERS", 24, -164, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel, label, 75, 24 + ((i - 1) % 4) * 78, -194 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel, label, 75, 24 + ((i - 1) % 4) * 78, -186 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
             panel.tabs[i]:EnableSelectionGlow()
         end
-        Text(panel, "CLICK", 24, -269, "GameFontHighlightSmall")
-        Text(panel, "ASSIGNED SPELL / ACTION", 104, -269, "GameFontHighlightSmall")
+        Text(panel, "CLICK", 24, -260, "GameFontHighlightSmall")
+        Text(panel, "ASSIGNED SPELL / ACTION", 104, -260, "GameFontHighlightSmall")
         panel.rows = {}
         for i = 1, 5 do
             local row = {}
-            row.label = Text(panel, A.buttons[i], 24, -305 - (i - 1) * 33)
-            row.button = Button(panel, "", 228, 104, -297 - (i - 1) * 33, function() OpenPicker(i) end)
+            row.label = Text(panel, A.buttons[i], 24, -294 - (i - 1) * 31)
+            row.button = Button(panel, "", 228, 104, -286 - (i - 1) * 31, function() OpenPicker(i) end)
             row.button.label:SetJustifyH("LEFT")
             panel.rows[i] = row
         end
-        Button(panel, "Reset all bindings", 155, 24, -476, function()
+        Button(panel, "Reset all bindings", 155, 24, -464, function()
             A.ResetBindings()
             OpenPicker(selectedButton)
+        end)
+        panel.resetSettings = Button(panel, "Reset settings", 155, 184, -464, function()
+            A.ResetOptions()
+            Update()
         end)
         panel.status = Text(panel, "", 24, -516, "GameFontHighlightSmall")
         panel.done = Button(panel, "Done", 100, 655, -508, function() panel:Hide() end)

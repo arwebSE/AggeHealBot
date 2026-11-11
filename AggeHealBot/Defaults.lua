@@ -18,7 +18,7 @@ A.spellCategories = {
         1243, 21562, 14752, 27681, 976, 27683, 588, 10060, 6346,
         19740, 19742, 20217, 1038, 19977, 20911, 1022, 1044, 6940,
         324, 24398, 408510, 52127, 546, 131},
-    utility = {50769, 20484, 2006, 7328, 2008, 212036, 212040, 212048,
+    utility = {437138, 1237948, 1237949, 1237950, 1237951, 50769, 20484, 2006, 7328, 2008, 212036, 212040, 212048,
         2782, 2893, 8946, 88423, 527, 528, 552, 4987, 1152, 526, 2870, 51886, 77130},
 }
 
@@ -68,6 +68,16 @@ A.presets = {
 A.buffs = {
     DRUID = {{1126, 21849}, {467}},
     PRIEST = {{1243, 21562}, {14752, 27681}, {976, 27683}},
+}
+
+-- Ordinary single-target resurrection spells have no reagent cost.
+A.resurrections = {DRUID = {437138, 1237948, 1237949, 1237950, 1237951, 50769}, PRIEST = {2006}, PALADIN = {7328}, SHAMAN = {2008}}
+A.combatResurrections = {DRUID = {20484}}
+A.dispels = {
+    DRUID = {{88423, "Magic", "Curse", "Poison"}, {2782, "Curse"}, {2893, "Poison"}, {8946, "Poison"}},
+    PRIEST = {{527, "Magic", "Disease"}, {552, "Disease"}, {528, "Disease"}},
+    PALADIN = {{4987, "Magic", "Disease", "Poison"}, {1152, "Disease", "Poison"}},
+    SHAMAN = {{77130, "Magic", "Curse"}, {51886, "Curse"}, {526, "Poison"}, {2870, "Disease"}},
 }
 
 -- HealBot's own menu has no equivalent here: Button 5 opens our small settings.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.4 — 2026-11-11
+
+- Add an optional Right-click menu override for player and target frames, off by default. Party and raid frames use their assigned right-click bindings. Modifier-click bindings are independent.
+- Recognize Forever's ranked Revive spell IDs in Utility and resurrection watching.
+- Disable and dim Cure in combat when Cure watcher is off, preserving its saved preference.
+- Hide the custom tooltip while unit menus are open and show it when hovering health or mana bars as well as the rest of a supported unit frame.
+- Add a Reset settings button that restores toggle defaults while preserving spell bindings.
+- Shorten setting labels and explain each toggle in a hover tooltip, available over both the checkbox and its label.
+- Arrange setting toggles in two columns and restore the compact editor height.
+- Limit automatic buff, cure and resurrection watches to players while retaining normal click bindings on friendly NPCs.
+- Add a default-on combat cure-alert toggle beside Cure watcher. Alerts use readable debuff data and show the assigned cure binding without changing protected combat bindings.
+- Enable Player frame and Hide raid controls by default, including when resetting settings.
+- Prioritize learned reagent-free resurrection spells on dead friendly players outside combat, with a pale blue resurrection glow and spell icon.
+- Add optional combat resurrection priority and a secure dead-unit watcher, disabled by default. Enabling it permits reagent-consuming combat resurrection spells.
+- Prioritize learned cures for removable debuffs outside combat, with a red cure glow, spell icon and debuff tooltip. Cure watching is enabled by default and can be disabled.
+- Show Blizzard's original unit tooltip while hovering your own portrait, alongside the persistent AggeHealBot binding or Shift shortcut tooltip.
+
 ## 1.0.3 — 2026-11-10
 
 - Add a target click-healing and buff-watch toggle, enabled by default for new and existing characters.

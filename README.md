@@ -59,10 +59,17 @@ Higher-rank auras are recognized through their canonical spell names, even when 
 
 Target-frame click healing and buff watching are **on by default** and can be switched off in `/ahb`.
 
-Two optional settings are **off by default**:
+**Right-click menu** is off by default. Turn it on in `/ahb` to use plain right-click for the unit menu on your player and target frames. Party and raid frames use their assigned right-click bindings.
 
-- Click healing on your player portrait, useful for solo testing.
-- Hiding Blizzard's raid-control side panel and tab, while retaining the unit frames.
+Outside combat, plain left-click prioritizes a learned reagent-free resurrection on a dead friendly player, then a learned cure for a removable debuff, then missing buffs, then your assigned heal. Resurrection has a pale-blue glow, and cure watching has a red glow. Cure watching can be disabled in `/ahb`.
+
+Automatic buff, cure and resurrection watches apply only to players. NPCs support your normal click bindings.
+
+**Combat resurrection** is off by default. Enable it to allow learned combat resurrection spells, including those that consume reagents. Combat resurrection uses secure conditions for dead party/raid members. Automatic cure priority runs outside combat, when aura data is readable.
+
+The **Cure in combat** toggle beside **Cure watcher** enables combat cure alerts when debuff data is readable. It is on by default. Combat alerts show the cure's assigned binding. Automatic left-click cure priority runs outside combat.
+
+**Player frame** and **Hide raid controls** are on by default. These enable click healing on your own portrait and hide Blizzard's raid-control side panel and tab.
 
 ## Casting behavior
 
