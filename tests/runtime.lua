@@ -46,12 +46,25 @@ local function Region()
     end
     function r:SetColorTexture(...) self.color = {...} end
     function r:SetTexture(value) self.texture = value end
+    function r:SetBlendMode(value) self.blendMode = value end
+    function r:SetAlpha(value) self.alpha = value end
+    function r:SetAtlas(value) self.atlas = value end
+    function r:SetDesaturated(value) self.desaturated = value end
+    function r:SetVertexColor(...) self.vertexColor = {...} end
+    function r:SetTexCoord(...) self.texCoords = {...} end
+    function r:ClearAllPoints() end
     function r:SetText(value) self.text = value end
     function r:CreateAnimationGroup()
         local group = {playing = false, plays = 0}
         function group:SetLooping(value) self.looping = value end
-        function group:CreateAnimation()
-            return {SetFromAlpha = function() end, SetToAlpha = function() end, SetDuration = function() end, SetSmoothing = function() end}
+        function group:CreateAnimation(kind)
+            local animation = {kind = kind}
+            function animation:SetFromAlpha(value) self.fromAlpha = value end
+            function animation:SetToAlpha(value) self.toAlpha = value end
+            function animation:SetDuration(value) self.duration = value end
+            function animation:SetSmoothing(value) self.smoothing = value end
+            self.animation = animation
+            return animation
         end
         function group:IsPlaying() return self.playing end
         function group:Play() self.playing = true; self.plays = self.plays + 1 end
@@ -107,7 +120,7 @@ local function mouseEdge(frame, button, down, prefix)
     local registered = false
     for _, edge in ipairs(frame.clicks or {}) do if edge == wanted then registered = true end end
     if not registered then return end
-    local suffix = button == "LeftButton" and "1" or button == "RightButton" and "2" or button:match("^Button(%d+)$")
+    local suffix = button == "LeftButton" and "1" or button == "RightButton" and "2" or button == "MiddleButton" and "3" or button:match("^Button(%d+)$")
     prefix = prefix or ""
     if suffix and frame.attrs[prefix .. "type" .. suffix] == "click" then
         local delegate = frame.attrs[prefix .. "clickbutton" .. suffix]
@@ -115,6 +128,7 @@ local function mouseEdge(frame, button, down, prefix)
     end
 end
 assert(loadfile("AggeHealBot/Defaults.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/CastHints.lua"))("AggeHealBot", ns)
 assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and buff reminders are not supported")
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
@@ -123,7 +137,7 @@ event("ADDON_LOADED", "AggeHealBot")
 event("PLAYER_LOGIN")
 assert(ns.version == GetAddOnMetadata("AggeHealBot", "Version"))
 assert(messages[#messages]:find("v" .. ns.version .. " loaded", 1, true), "login announces installed TOC version")
-assert(cvars.autoSelfCast == "0", "disable client self-cast fallback for heals and buffs")
+assert(cvars.autoSelfCast == "1", "frame targeting must leave the global Auto Self Cast preference unchanged")
 assert(AggeHealBotDB.smartBuffs == true)
 assert(AggeHealBotDB.targetFrame == true, "target support must default on for existing saved settings without the new option")
 assert(AggeHealBotDB.playerFrame == true, "portrait support defaults on")
@@ -309,7 +323,8 @@ assert(ns.SaveBinding("", 2, "spell", "Rejuvenation"))
 assert(PlayerFrame.attrs.spell2 == "Rejuvenation")
 assert(not ns.SaveBinding("", 2, "spell", "Made up spell"))
 assert(ns.SaveBinding("", 2, "target"))
-assert(PlayerFrame.attrs.type2 == "target" and PlayerFrame.attrs.spell2 == nil)
+assert(PlayerFrame.attrs.type2 == "macro" and PlayerFrame.attrs.spell2 == nil
+    and PlayerFrame.attrs.macrotext2 == "/target [@player,exists]")
 assert(ns.SaveBinding("", 2, "togglemenu"))
 assert(PlayerFrame.attrs.type2 == "click" and PlayerFrame.attrs.clickbutton2 == menu, "unit menu can be rebound")
 assert(ns.SaveBinding("", 2, "target"))
@@ -320,12 +335,12 @@ assert(ns.SaveBinding("", 1, "none"))
 SlashCmdList.AGGEHEALBOT("buffs on")
 assert(PlayerFrame.attrs.type1 == "none", "buffing respects disabled left click")
 assert(ns.SaveBinding("", 1, "target"))
-assert(PlayerFrame.attrs.type1 == "target", "buffing respects target action")
+assert(PlayerFrame.attrs.type1 == "macro" and PlayerFrame.attrs.macrotext1 == "/target [@player,exists]", "buffing respects target action")
 assert(ns.SaveBinding("", 1, "default"))
 assert(PlayerFrame.attrs.spell1 == "Mark")
 combat = true
 assert(ns.SaveBinding("", 2, "spell", "Regrowth"))
-assert(PlayerFrame.attrs.type2 == "target", "editing during combat defers secure changes")
+assert(PlayerFrame.attrs.type2 == "macro" and PlayerFrame.attrs.macrotext2 == "/target [@player,exists]", "editing during combat defers secure changes")
 event("UNIT_AURA", "player")
 combat = false
 event("PLAYER_REGEN_ENABLED")
@@ -377,10 +392,11 @@ local originalCreateFrame = CreateFrame
 CreateFrame = function(kind, name, parent, template)
     local f = originalCreateFrame(kind, name, parent, template)
     if name then _G[name] = f end
-    for _, method in ipairs({"SetSize", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetJustifyH", "SetFocus", "ClearFocus"}) do
+    for _, method in ipairs({"SetSize", "SetWidth", "SetWordWrap", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetJustifyH", "SetFocus", "ClearFocus"}) do
         f[method] = function() end
     end
     function f:SetParent(value) self.parent = value end
+    function f:SetPoint(...) self.point = {...} end
     function f:SetScale(value) self.scale = value end
     function f:SetSize(width, height) self.width, self.height = width, height end
     function f:GetWidth() return self.width or 780 end
@@ -392,9 +408,11 @@ CreateFrame = function(kind, name, parent, template)
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self) end
     end
     function f:GetText() return self.text or "" end
+    function f:GetStringWidth() return #(self.text or "") * 5 end
     function f:SetChecked(v) self.checked = v end
     function f:SetEnabled(value) self.enabled = value end
     function f:SetAlpha(value) self.alpha = value end
+    function f:SetTextColor(...) self.textColor = {...} end
     function f:GetChecked() return self.checked end
     function f:Show() self.shown = true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
     function f:IsShown() return self.shown end
@@ -407,6 +425,23 @@ CreateFrame = function(kind, name, parent, template)
         if self.scripts.OnHide then self.scripts.OnHide(self) end
     end
     function f:CreateFontString() return CreateFrame("FontString") end
+    if kind == "DropdownButton" then
+        f.Text = CreateFrame("FontString")
+        function f:SetDefaultText(text) self.defaultText = text end
+        function f:CloseMenu() self.menuOpen = false end
+        function f:SetupMenu(generator) self.menuGenerator = generator end
+        function f:GenerateMenu()
+            self.menuOptions = {}
+            local dropdown = self
+            local root = {}
+            function root:CreateRadio(label, selected, choose, data)
+                dropdown.menuOptions[data] = {label = label, selected = function() return selected(data) end,
+                    choose = function() choose(data) end}
+                if selected(data) then dropdown.selectedText = label end
+            end
+            self.menuGenerator(self, root)
+        end
+    end
     f.TitleText = {SetText = function() end}
     if template == "PortraitFrameTemplate" then
         f.NineSlice = CreateFrame("Frame")
@@ -438,6 +473,7 @@ CreateFrame = function(kind, name, parent, template)
     return f
 end
 NineSliceUtil = {ApplyLayoutByName = function(frame, layout) frame.layout = layout end}
+GameTooltip = CreateFrame("GameTooltip", "GameTooltip", UIParent, "GameTooltipTemplate")
 local registeredCanvas, registeredCategory
 Settings = {
     RegisterCanvasLayoutCategory = function(canvas, name)
@@ -448,6 +484,10 @@ Settings = {
     RegisterAddOnCategory = function(category) registeredCategory = category end,
 }
 tinsert = table.insert
+C_Texture = {GetAtlasInfo = function()
+    return {width = 96, height = 144, leftTexCoord = 0, rightTexCoord = 1, topTexCoord = 0, bottomTexCoord = 1}
+end}
+assert(loadfile("AggeHealBot/MouseBindings.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Options.lua"))("AggeHealBot", ns)
 assert(registeredCanvas and registeredCategory, "editor registered in Options AddOns")
 local category = ns.RegisterOptionsCategory()
@@ -496,7 +536,43 @@ ns.SetOption("hideRaidControls", false)
 assert(CompactRaidFrameManager:IsShown(), "turning option off restores stock controls")
 local browser = AggeHealBotSpellPicker
 browser.search:SetText("")
+assert(browser.filter == "suggested" and browser.tabs[1].category == "suggested", "Suggested must be the default")
+local suggestedCategories = {}
+for page = 1, browser.pages do
+    browser.page = page
+    browser:Render()
+    for _, item in ipairs(browser.rows) do
+        if item.choice then
+            assert(item.choice.category == "heals" or item.choice.category == "buffs" or item.choice.category == "utility")
+            suggestedCategories[item.choice.category] = true
+        end
+    end
+end
+assert(suggestedCategories.heals and suggestedCategories.buffs and suggestedCategories.utility,
+    "Suggested combines healing, buffs and utility")
+assert(browser.tabs[#browser.tabs].category == "all", "All must be the rightmost tab")
+browser.search:SetText("Claw")
+assert(browser.empty.shown, "Suggested excludes Other spells")
 browser.tabs[6].scripts.OnClick(browser.tabs[6])
+assert(browser.rows[1].choice.spell == "Claw", "All still includes Other spells")
+browser.search:SetText("")
+local allSpells, allActions = {}, {}
+for page = 1, browser.pages do
+    browser.page = page
+    browser:Render()
+    for _, item in ipairs(browser.rows) do
+        if item.choice then
+            if item.choice.action == "spell" then allSpells[item.choice.spell] = true
+            else allActions[item.choice.action] = true end
+        end
+    end
+end
+for _, item in ipairs(browser.choices) do assert(allSpells[item.spell], "All must include every spell across its pages") end
+for _, item in ipairs(browser.actions) do assert(allActions[item.action], "All must include every action across its pages") end
+browser.search:SetText("AggeHealBot settings")
+assert(browser.rows[1].choice.action == "settings", "All must search actions as well as spells")
+browser.search:SetText("")
+browser.tabs[5].scripts.OnClick(browser.tabs[5])
 assert(browser.filter == "actions" and browser.rows[1].choice.action == "target", "actions have a separate tab")
 browser.tabs[2].scripts.OnClick(browser.tabs[2])
 assert(browser.filter == "heals" and browser.rows[1].choice.category == "heals", "heals filter")
@@ -506,7 +582,7 @@ browser.search:SetText("no such spell")
 assert(browser.empty.shown and not browser.rows[1].shown, "empty search state")
 browser.search:SetText("")
 browser.tabs[1].scripts.OnClick(browser.tabs[1])
-assert(browser.rows[1].choice.category == "heals", "all spells begins with heals, not actions")
+assert(browser.rows[1].choice.category == "heals", "Suggested begins with heals")
 local samePanel, sameBinding = AggeHealBotSettings, AggeHealBotSettings.rows[2].button
 registeredCanvas:SetSize(650, 500)
 registeredCanvas:SetFrameStrata("HIGH")
@@ -527,16 +603,24 @@ print("PASS: inline UI, search/selection, category filters, passive removal, spe
 
 ns.SetOption("playerFrame", true)
 assert(ns.SaveBinding("shift-", 1, "spell", "Regrowth"))
-assert(PlayerFrame.attrs["shift-type1"] == "click" and PlayerFrame.attrs["shift-clickbutton1"] == ns.settingsButton)
-assert(PlayerFrame.attrs["shift-macrotext1"] == nil, "portrait menu shortcut must not also cast a heal")
+assert(PlayerFrame.attrs["shift-type1"] == "macro", "saved Shift-left spell overrides the default target action")
+assert(PlayerFrame.attrs["shift-type3"] == "click" and PlayerFrame.attrs["shift-clickbutton3"] == ns.settingsButton)
+assert(PlayerFrame.attrs["shift-macrotext3"] == nil, "menu binding must not also cast a heal")
 assert(CompactRaidFrame1.attrs["shift-type1"] == "macro", "party/raid Shift-left spell must remain unchanged")
+manager:CloseMenus()
+mouseEdge(PlayerFrame, "RightButton", true, "shift-")
+assert(currentMenu, "Shift-right opens the unit context menu")
+mouseEdge(PlayerFrame, "RightButton", false, "shift-")
+assert(currentMenu, "releasing Shift-right leaves the context menu open")
+mouseEdge(PlayerFrame, "RightButton", true, "shift-")
+assert(not currentMenu, "pressing Shift-right again closes the context menu")
 if AggeHealBotSettings.shown then ns.ToggleOptions() end
-mouseEdge(PlayerFrame, "LeftButton", true, "shift-")
-assert(AggeHealBotSettings.shown, "Shift-left opens the portrait settings menu")
-mouseEdge(PlayerFrame, "LeftButton", false, "shift-")
+mouseEdge(PlayerFrame, "MiddleButton", true, "shift-")
+assert(AggeHealBotSettings.shown, "Shift-middle opens the settings menu")
+mouseEdge(PlayerFrame, "MiddleButton", false, "shift-")
 assert(AggeHealBotSettings.shown, "mouse release must leave the menu open")
 combat = true
-mouseEdge(PlayerFrame, "LeftButton", true, "shift-")
+mouseEdge(PlayerFrame, "MiddleButton", true, "shift-")
 assert(not AggeHealBotSettings.shown, "preinstalled portrait shortcut works in combat")
 combat = false
 
@@ -562,14 +646,14 @@ PlayerFrame.scripts.OnEnter(PlayerFrame)
 local shortcutTooltip = AggeHealBotTooltip
 assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "self portrait must show Blizzard's original tooltip alongside the Shift hint")
 assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and shortcutTooltip.ownerAnchor == "ANCHOR_RIGHT", "self portrait must use the shared native-tooltip position and keep addon information beside the frame")
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.")
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.")
 -- Simulate the stock unit tooltip being rebuilt/faded by Blizzard after hover.
 GameTooltip:SetUnit("player")
 GameTooltip:Hide()
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.", "Blizzard tooltip refresh must not erase or fade the shortcut hint")
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.", "Blizzard tooltip refresh must not erase or fade the shortcut hint")
 shiftHeld = false
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and shortcutTooltip.lines[2] ~= "Shift + Left Click to open AggeHealBot Menu.", "releasing Shift must show the full persistent binding tooltip")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and shortcutTooltip.lines[2] ~= "Shift + Middle Click to open AggeHealBot Menu.", "releasing Shift must show the full persistent binding tooltip")
 assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "normal self hover must keep Blizzard's tooltip visible beside addon information")
 local normalTooltipLines = #shortcutTooltip.lines
 GameTooltip:SetOwner(PlayerFrame, "ANCHOR_RIGHT")
@@ -578,10 +662,10 @@ GameTooltip:Hide()
 assert(shortcutTooltip.shown and #shortcutTooltip.lines == normalTooltipLines, "stock tooltip updates must not erase the normal portrait binding tooltip")
 shiftHeld = true
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and #shortcutTooltip.lines == 2 and shortcutTooltip.lines[2] == "Shift + Left Click to open AggeHealBot Menu.", "holding Shift during hover must update the tooltip without duplicate lines")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines == 7 and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.", "holding Shift during hover must update the tooltip without duplicate lines")
 ctrlHeld = true
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] ~= "Shift + Left Click to open AggeHealBot Menu.", "Ctrl-Shift must show the normal persistent tooltip")
+assert(shortcutTooltip.shown and shortcutTooltip.lines[2] ~= "Shift + Middle Click to open AggeHealBot Menu.", "Ctrl-Shift must show the normal persistent tooltip")
 ctrlHeld = false
 ns.SetOption("playerFrame", false)
 assert(PlayerFrame.attrs["shift-type1"] == nil and PlayerFrame.attrs["shift-clickbutton1"] == nil)
@@ -595,7 +679,7 @@ assert(not shortcutTooltip.shown, "leaving the portrait must hide the dedicated 
 event("MODIFIER_STATE_CHANGED")
 assert(not GameTooltip.shown, "modifier changes after leaving must not reopen the tooltip")
 assert(not shortcutTooltip.shown, "modifier changes after leaving must not reopen the dedicated hint")
-print("PASS: portrait-only Shift-left menu toggles once, works in combat, restores on disable, and shows a live modifier tooltip")
+print("PASS: rebindable Shift-middle menu toggles once, works in combat, restores on disable, and shows a live modifier tooltip")
 
 local normalParty = CreateFrame("Button", "PartyMemberFrame1")
 normalParty:SetAttribute("unit", "party1")
@@ -738,7 +822,7 @@ assert(targetButton.parent == TargetFrame and targetButton.template == "SecureUn
 assert(targetVisibility == "[@target,exists,help] show; hide" and targetButton.shown, "secure visibility must limit target clicks to friendly targets")
 assert(targetButton.attrs.spell1 == "Mark" and targetButton.regions[2].shown, "friendly targets get default buff priority and an icon")
 assert(TargetFrame.attrs.type1 == "target" and TargetFrame.attrs.type2 == "togglemenu", "native target bindings must remain untouched")
-assert(targetButton.attrs["shift-clickbutton1"] == ns.settingsButton, "target portrait gets the Shift-left menu shortcut")
+assert(targetButton.attrs["shift-clickbutton3"] == ns.settingsButton, "target gets the rebindable Shift-middle menu default")
 mouseEdge(targetButton, "Button4", true)
 assert(targetMenus == 1, "target menu binding must use the original target frame's menu")
 auras.target = {{name = "Mark"}}
@@ -1228,3 +1312,402 @@ for _, case in ipairs({
     assert(targetButton.attrs.spell1 == case.heal, "unknown matching rank must not be assumed weaker: " .. case.base)
 end
 print("PASS: all five buff families offer weaker-rank upgrades with icon/glow, suppress equal/higher ranks and compare group equivalents")
+
+-- Shared hints never use secret power/cooldown/health values or change casts.
+local usable, lowPower, cooldownInfo = true, false, nil
+C_Spell.IsSpellUsable = function() return usable, lowPower end
+C_Spell.GetSpellCooldown = function(id) return id == 61304 and {startTime = 0, duration = 0} or cooldownInfo end
+assert(ns.CastProblem("Regrowth", "target") == nil)
+lowPower = true
+assert(ns.CastProblem("Regrowth", "target") == "Not enough mana / power")
+lowPower, usable = false, false
+assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable")
+usable, cooldownInfo = true, {startTime = now - 2, duration = 10}
+assert(ns.CastProblem("Regrowth", "target") == "On cooldown (8s)")
+C_Spell.GetSpellCooldown = function() return {startTime = now - 1, duration = 2} end
+assert(ns.CastProblem("Regrowth", "target") == nil, "the global cooldown must not dim every spell")
+local hiddenValue = setmetatable({}, {__add = function() error("secret arithmetic") end, __mul = function() error("secret arithmetic") end})
+issecretvalue = function(value) return value == hiddenValue end
+C_Spell.IsSpellUsable = function() return hiddenValue, hiddenValue end
+C_Spell.GetSpellCooldown = function() return {startTime = hiddenValue, duration = hiddenValue} end
+assert(ns.CastProblem("Regrowth", "target") == nil)
+local healthValue = 100
+UnitHealth, UnitHealthMax = function() return healthValue end, function() return 100 end
+healthValue = hiddenValue
+assert(not ns.NeedsHealing("target"), "restricted health must never be compared")
+combat = true
+UnitHealth = function() error("must not read combat health") end
+assert(not ns.NeedsHealing("target") and ns.CastProblem("Regrowth", "target") == nil)
+combat = false
+UnitHealth = function() return healthValue end
+healthValue = 89
+assert(ns.NeedsHealing("target"))
+healthValue = 90
+assert(not ns.NeedsHealing("target"), "90 percent is the stable boundary")
+issecretvalue = function() return false end
+C_Spell.IsSpellUsable = function() return usable, lowPower end
+C_Spell.GetSpellCooldown = function() return nil end
+
+-- Injured players get the assigned heal instead of a missing buff; cure and
+-- resurrection priorities remain intact. The event handles both directions.
+UnitClass = function() return "Druid", "DRUID" end
+known[1126], known[8936], known[2782] = "Mark", "Regrowth", "Remove Curse"
+spellNames[1126], spellNames[8936], spellNames[2782] = "Mark", "Regrowth", "Remove Curse"
+C_SpellBook.GetSpellBookItemInfo = function(slot)
+    return ({ {spellID = 8936}, {spellID = 1126}, {spellID = 2782} })[slot]
+end
+auras.target, harmful.target, healthValue = {}, {}, 100
+event("PLAYER_LOGIN")
+assert(targetButton.attrs.spell1 == "Mark")
+healthValue = 89
+event("UNIT_HEALTH", "target")
+assert(targetButton.attrs.spell1 == "Regrowth" and not targetButton.regions[2].shown, "injury suppresses the buff override and glow")
+targetButton.scripts.OnEnter(targetButton)
+local function HasTip(text)
+    for _, line in ipairs(AggeHealBotTooltip.lines) do if line:find(text, 1, true) then return true end end
+end
+assert(HasTip("Healing first: below 90% health."))
+harmful.target = {{name = "Hex", dispelName = "Curse"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Remove Curse", "cure priority is independent of missing-buff injury protection")
+harmful.target, healthValue = {}, 90
+event("UNIT_HEALTH", "target")
+assert(targetButton.attrs.spell1 == "Mark", "recovering past the threshold restores buff priority")
+local beforeMacro = targetButton.attrs.macrotext1
+lowPower = true
+event("SPELL_UPDATE_USABLE")
+assert(targetButton.attrs.macrotext1 == beforeMacro and HasTip("Not enough mana / power"), "availability hints do not change the secure action")
+assert(not targetButton.regions[3].shown, "unavailable buff stops the urgent glow")
+lowPower = false
+event("SPELL_UPDATE_USABLE")
+assert(targetButton.regions[3].shown, "availability recovery restores the glow")
+assert(cvars.autoSelfCast == "1" and targetButton.attrs.checkselfcast == false and PlayerFrame.attrs.checkselfcast == false)
+assert(not targetButton.attrs.macrotext1:find("@player", 1, true), "explicit frame macros must not contain a self fallback")
+print("PASS: public-only range/mana/cooldown hints, global cooldown exclusion, injured-player healing priority, and unchanged global Auto Self Cast")
+
+-- Paladin watch selects exactly one blessing; overrides are per target class.
+AggeHealBotDB.bindings = {}
+local recipientClass = "WARRIOR"
+UnitClass = function(unit) return unit == "player" and "Paladin" or recipientClass, unit == "player" and "PALADIN" or recipientClass end
+UnitPowerType = function() error("blessing rules must not inspect druid forms or resource types") end
+for id, name in pairs({[19750] = "Flash of Light", [19740] = "Might", [19834] = "Might", [19742] = "Wisdom", [20217] = "Kings", [4987] = "Cleanse", [25782] = "Greater Might"}) do
+    spellNames[id], known[id] = name, name
+end
+known[25782] = nil
+C_SpellBook.GetSpellBookItemInfo = function(slot)
+    return ({ {spellID = 19750}, {spellID = 19834}, {spellID = 19742}, {spellID = 20217}, {spellID = 4987} })[slot]
+end
+healthValue, auras.target, harmful.target = 100, {}, {}
+event("PLAYER_LOGIN")
+assert(targetButton.attrs.spell1 == "Might", "warriors default to Might")
+recipientClass = "PRIEST"
+event("PLAYER_TARGET_CHANGED")
+assert(targetButton.attrs.spell1 == "Wisdom", "mana classes default to Wisdom")
+recipientClass = "DRUID"
+event("PLAYER_TARGET_CHANGED")
+assert(targetButton.attrs.spell1 == "Wisdom")
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Wisdom", "druid Auto must stay on Wisdom without inspecting form")
+assert(ns.SetPaladinRule("DRUID", "kings") and targetButton.attrs.spell1 == "Kings")
+assert(ns.SetPaladinRule("DRUID", "off") and targetButton.attrs.spell1 == "Flash of Light")
+assert(not ns.SetPaladinRule("DRUID", "bogus") and not ns.SetPaladinRule("BOGUS", "might"))
+assert(ns.SetPaladinRule("DRUID", "might") and targetButton.attrs.spell1 == "Might", "users can explicitly choose Might for druids")
+auras.target = {{name = "Old Might", spellId = 19740}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Might", "weaker blessing must offer an upgrade")
+auras.target = {{name = "Greater Might", spellId = 25782}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Flash of Light", "a stronger greater blessing satisfies the watch")
+auras.target = {{name = "Might", spellId = 19834}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Flash of Light", "a satisfied blessing must not cycle to Wisdom or Kings")
+auras.target = {}
+healthValue = 20
+event("UNIT_HEALTH", "target")
+assert(targetButton.attrs.spell1 == "Flash of Light")
+harmful.target = {{name = "Venom", dispelName = "Poison"}}
+event("UNIT_AURA", "target")
+assert(targetButton.attrs.spell1 == "Cleanse")
+RAID_CLASS_COLORS = {WARRIOR = {r = 0.78, g = 0.61, b = 0.43}}
+ns.ShowOptions()
+assert(AggeHealBotSettings.blessings.shown)
+AggeHealBotSettings.blessings.scripts.OnClick()
+assert(AggeHealBotTools.rows[1].class == "WARRIOR")
+AggeHealBotTools.rows[1].dropdown.menuOptions.might.choose()
+assert(ns.GetPaladinRule("WARRIOR") == "might")
+AggeHealBotTools.defaults.scripts.OnClick()
+assert(ns.GetPaladinRule("WARRIOR") == "auto")
+combat = true
+local protectedBeforeRule = targetButton.attrs.macrotext1
+assert(ns.SetPaladinRule("DRUID", "kings") and targetButton.attrs.macrotext1 == protectedBeforeRule)
+combat = false
+harmful.target, healthValue = {}, 100
+event("PLAYER_REGEN_ENABLED")
+assert(targetButton.attrs.spell1 == "Kings", "combat rule edits must apply after combat")
+ns.ResetOptions()
+assert(ns.GetPaladinRule("DRUID") == "auto", "Reset settings restores suggested blessing rules")
+print("PASS: paladin class suggestions, Wisdom for druids without form inspection, per-class overrides, rank upgrades, greater equivalents, injury/cure priority, settings and combat deferral")
+
+-- Modifier defaults are ordinary bindings on every supported frame. A saved
+-- spell/disabled action must win over a menu shortcut, including on portraits.
+ns.ResetBindings()
+for _, frame in ipairs({PlayerFrame, targetButton, normalParty, CompactRaidFrame1}) do
+    assert(frame.attrs["shift-type1"] == "macro" and frame.attrs["shift-clickbutton1"] == nil)
+    local expectedUnit = frame == PlayerFrame and "player" or frame == targetButton and "target" or "mouseover"
+    assert(frame.attrs["shift-macrotext1"] == "/target [@" .. expectedUnit .. ",exists]", "target binding must bypass the native interaction filter without a fallback")
+    assert(frame.attrs["shift-type3"] == "click" and frame.attrs["shift-clickbutton3"] == ns.settingsButton)
+    assert(frame.attrs["shift-type2"] == "click" and frame.attrs["shift-clickbutton2"] == frame.attrs.clickbutton4,
+        "Shift-right must use the same unit context-menu delegate as Button 4")
+end
+assert(ns.SaveBinding("shift-", 1, "none"))
+assert(ns.SaveBinding("shift-", 2, "spell", "Flash of Light"))
+assert(ns.SaveBinding("shift-", 3, "none"))
+for _, frame in ipairs({PlayerFrame, targetButton, normalParty, CompactRaidFrame1}) do
+    assert(frame.attrs["shift-type1"] == "none")
+    assert(frame.attrs["shift-type2"] == "macro" and frame.attrs["shift-clickbutton2"] == nil)
+    assert(frame.attrs["shift-macrotext2"]:find("Flash of Light", 1, true))
+end
+shiftHeld = true
+targetButton.scripts.OnEnter(targetButton)
+assert(not HasTip("Click to open AggeHealBot Menu."), "rebound settings shortcut must not leave a misleading hover hint")
+assert(HasTip("Shift + RightFlash of Light"), "modifier hover must show the user's saved spell")
+ns.SaveBinding("shift-", 1, "default")
+ns.SaveBinding("shift-", 2, "default")
+ns.SaveBinding("shift-", 3, "default")
+event("MODIFIER_STATE_CHANGED")
+assert(HasTip("Shift + Middle Click to open AggeHealBot Menu."))
+assert(HasTip("Shift + LeftTarget unit"))
+shiftHeld = false
+
+-- Resource/cooldown events must not turn into full party/raid aura rescans.
+local countedAuraGetter, hintAuraReads = C_UnitAuras.GetAuraDataByIndex, 0
+C_UnitAuras.GetAuraDataByIndex = function(...)
+    hintAuraReads = hintAuraReads + 1
+    return countedAuraGetter(...)
+end
+local stableMacro = targetButton.attrs.macrotext1
+event("UNIT_POWER_UPDATE", "player")
+event("SPELL_UPDATE_USABLE")
+event("SPELL_UPDATE_COOLDOWN")
+assert(hintAuraReads == 0 and stableMacro == targetButton.attrs.macrotext1, "hint refresh must not scan auras or change protected macros")
+C_UnitAuras.GetAuraDataByIndex = countedAuraGetter
+assert(cvars.autoSelfCast == "1", "reloads, rebinds and combat transitions must preserve global Auto Self Cast")
+print("PASS: editable Shift-left target and Shift-middle settings defaults on all frames, modifier tooltip overrides, and lightweight resource/cooldown refreshes")
+
+-- Blessing choices are real dropdowns, not row clicks or mouse-wheel cycles.
+ns.ShowOptions()
+AggeHealBotSettings.blessings.scripts.OnClick()
+assert(AggeHealBotTools.shown and not AggeHealBotSpellPicker.shown)
+local warrior = AggeHealBotTools.rows[1]
+assert(warrior.dropdown.template == "WowStyle1DropdownTemplate" and warrior.scripts.OnClick == nil)
+assert(warrior.icon.texture == "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+assert(warrior.label.textColor[1] == 0.78 and warrior.label.textColor[2] == 0.61 and warrior.label.textColor[3] == 0.43,
+    "class names must use their class color")
+assert(warrior.label.point[2] == 42 and warrior.dropdown.point[2] == 174, "class label and dropdown use separate padded columns")
+assert(AggeHealBotTools.back.point[3] == AggeHealBotTools.defaults.point[3], "footer buttons share one row")
+local paneTop = -AggeHealBotTools.point[3]
+local backBottom = paneTop - AggeHealBotTools.back.point[3] + AggeHealBotTools.back.height
+assert(-AggeHealBotSettings.done.point[3] - backBottom >= 24, "Back to bindings has a clear gap above Done")
+local previousRule = ns.GetPaladinRule("WARRIOR")
+warrior.dropdown:GenerateMenu()
+assert(ns.GetPaladinRule("WARRIOR") == previousRule, "opening a dropdown must not change the blessing")
+for _, rule in ipairs({"auto", "might", "wisdom", "kings", "off"}) do assert(warrior.dropdown.menuOptions[rule]) end
+warrior.dropdown.menuOptions.wisdom.choose()
+assert(ns.GetPaladinRule("WARRIOR") == "wisdom" and warrior.dropdown.selectedText == "Wisdom")
+AggeHealBotTools.defaults.scripts.OnClick()
+assert(warrior.dropdown.selectedText == "Auto: Might", "reset refreshes dropdown selection labels")
+warrior.dropdown.menuOpen = true
+AggeHealBotSettings.blessings.scripts.OnClick()
+assert(AggeHealBotSpellPicker.shown and not AggeHealBotTools.shown and not warrior.dropdown.menuOpen,
+    "clicking Paladin blessings again returns to bindings and closes open dropdowns")
+print("PASS: native blessing dropdown choices, padded class/icon columns, separated footer and pane toggle")
+
+-- Advance binding is optional, support-only, and restricted to this class.
+spellNames[635], spellNames[20271], spellNames[465] = "Holy Light", "Judgement", "Passive test aura"
+known[635], known[20271], known[465] = nil, nil, nil
+C_Spell.IsSpellPassive = function(id) return id == 465 end
+local function FindChoice(spell, includeUnlearned)
+    for _, choice in ipairs(ns.GetSpellChoices(includeUnlearned)) do if choice.spell == spell then return choice end end
+end
+assert(not AggeHealBotDB.showUnlearned and not FindChoice("Holy Light", false))
+assert(not ns.SaveBinding("alt-", 1, "spell", "Holy Light"), "unlearned binding requires explicit opt-in")
+local futureHolyLight = FindChoice("Holy Light", true)
+assert(futureHolyLight and futureHolyLight.unlearned and futureHolyLight.category == "heals")
+assert(not FindChoice("Judgement", true) and not FindChoice("Passive test aura", true), "unlearned catalogue must not add attacks or passives")
+spellNames[402174], known[402174] = "Foreign Penance", nil
+assert(not FindChoice("Foreign Penance", true), "other classes' unlearned spells must not be shown")
+local spellPicker = AggeHealBotSpellPicker
+AggeHealBotSettings.tabs[4].scripts.OnClick()
+AggeHealBotSettings.rows[1].button.scripts.OnClick()
+spellPicker.showUnlearned:SetChecked(true)
+spellPicker.showUnlearned.scripts.OnClick(spellPicker.showUnlearned)
+spellPicker.search:SetText("Holy Light")
+assert(spellPicker.rows[1].choice.unlearned and spellPicker.rows[1].alpha < 1)
+spellPicker.rows[1].scripts.OnEnter(spellPicker.rows[1])
+assert(GameTooltip.shown and GameTooltip.lines[2] == "Not learned yet")
+spellPicker.rows[1].scripts.OnLeave(spellPicker.rows[1])
+assert(not GameTooltip.shown)
+spellPicker.rows[1].scripts.OnClick(spellPicker.rows[1])
+assert(AggeHealBotDB.bindings["alt-1"].spell == "Holy Light", "unlearned rows must be selectable through the normal binding editor")
+assert(AggeHealBotSettings.rows[1].button.label.text:find("(unlearned)", 1, true), "the assigned binding must also explain its unlearned status")
+assert(PlayerFrame.attrs["alt-type1"] == "none" and PlayerFrame.attrs["alt-macrotext1"] == nil,
+    "unlearned spells must have no executable cast")
+spellPicker.showUnlearned:SetChecked(false)
+spellPicker.showUnlearned.scripts.OnClick(spellPicker.showUnlearned)
+assert(AggeHealBotDB.bindings["alt-1"].spell == "Holy Light", "hiding unlearned spells must not erase planned bindings")
+-- The live book may expose a future rank before it is learned.
+Enum.SpellBookItemType = {FutureSpell = 4, Spell = 1}
+local bookBeforeFuture = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(slot, bank)
+    if slot == 5 then return {spellID = 635, itemType = Enum.SpellBookItemType.FutureSpell} end
+    return bookBeforeFuture(slot, bank)
+end
+event("SPELLS_CHANGED")
+assert(not FindChoice("Holy Light", false) and PlayerFrame.attrs["alt-type1"] == "none", "future book entries do not count as learned")
+-- Training a different rank with the same name activates the saved binding.
+spellNames[639], known[639] = "Holy Light", "Holy Light"
+C_SpellBook.GetSpellBookItemInfo = function(slot, bank)
+    if slot == 5 then return {spellID = 639, itemType = Enum.SpellBookItemType.Spell} end
+    return bookBeforeFuture(slot, bank)
+end
+event("SPELLS_CHANGED")
+assert(PlayerFrame.attrs["alt-type1"] == "macro" and PlayerFrame.attrs["alt-spell1"] == "Holy Light")
+assert(FindChoice("Holy Light", false) and not FindChoice("Holy Light", false).unlearned)
+AggeHealBotSettings.scripts.OnEvent(AggeHealBotSettings, "SPELLS_CHANGED")
+assert(spellPicker.rows[1].choice.spell == "Holy Light" and spellPicker.rows[1].alpha == 1,
+    "training must restore learned-row opacity")
+assert(not AggeHealBotSettings.rows[1].button.label.text:find("(unlearned)", 1, true), "training must clear the assigned binding's unlearned label")
+ns.SetOption("showUnlearned", true)
+ns.ResetOptions()
+assert(not AggeHealBotDB.showUnlearned, "reset restores Show unlearned to off")
+print("PASS: optional support-only unlearned catalogue, dimmed rows and hover help, inactive planned bindings, future book handling and automatic activation on training")
+
+-- A missing first candidate must not hide a real fallback spell name. If all
+-- candidates are absent from this client, there is no spell to call unlearned.
+spellNames[991101] = "Named fallback heal"
+ns.presets.PALADIN[#ns.presets.PALADIN + 1] = {"Ctrl + Shift + Middle", "ctrl-shift-", 3, {991100, 991101}}
+ns.presets.PALADIN[#ns.presets.PALADIN + 1] = {"Alt + Shift + Middle", "alt-shift-", 3, {991102}}
+event("SPELLS_CHANGED")
+ns.ShowOptions()
+assert(AggeHealBotSpellPicker.filter == "suggested", "reopening the editor restores Suggested")
+AggeHealBotSettings.tabs[5].scripts.OnClick()
+assert(AggeHealBotSettings.rows[3].button.label.text:find("Named fallback heal", 1, true), "a valid fallback name replaces the generic Spell placeholder")
+assert(AggeHealBotSettings.rows[3].button.label.text:find("(unlearned)", 1, true))
+AggeHealBotSettings.tabs[6].scripts.OnClick()
+assert(AggeHealBotSettings.rows[3].button.label.text == "Disabled", "a preset with no resolvable identity must show Disabled")
+assert(PlayerFrame.attrs["alt-shift-type3"] == "none")
+print("PASS: preset fallback names and disabled unavailable spell identities without generic Spell placeholders")
+
+-- Learned Other spells must precede unlearned heals, across every page.
+spellNames[991103], spellNames[991104] = "Known other skill", "Unlearned test heal"
+known[991103], known[991104] = "Known other skill", nil
+ns.spellCategories.heals[#ns.spellCategories.heals + 1] = 991104
+ns.classSpells.PALADIN[#ns.classSpells.PALADIN + 1] = 991104
+local bookBeforeSorting = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(slot, bank)
+    if slot == 4 then return {spellID = 991103} end
+    return bookBeforeSorting(slot, bank)
+end
+event("SPELLS_CHANGED")
+local seenFuture, learnedOtherIndex, futureHealIndex = false, nil, nil
+for index, item in ipairs(ns.GetSpellChoices(true)) do
+    if item.unlearned then seenFuture = true else assert(not seenFuture, "no learned spell may follow an unlearned one") end
+    if item.spell == "Known other skill" then learnedOtherIndex = index end
+    if item.spell == "Unlearned test heal" then futureHealIndex = index end
+end
+assert(learnedOtherIndex and futureHealIndex and learnedOtherIndex < futureHealIndex)
+ns.ShowOptions()
+AggeHealBotSpellPicker.showUnlearned:SetChecked(true)
+AggeHealBotSpellPicker.showUnlearned.scripts.OnClick(AggeHealBotSpellPicker.showUnlearned)
+AggeHealBotSpellPicker.tabs[6].scripts.OnClick(AggeHealBotSpellPicker.tabs[6])
+seenFuture = false
+for page = 1, AggeHealBotSpellPicker.pages do
+    AggeHealBotSpellPicker.page = page
+    AggeHealBotSpellPicker:Render()
+    for _, row in ipairs(AggeHealBotSpellPicker.rows) do
+        if row.choice then
+            if row.choice.unlearned then seenFuture = true
+            else assert(not seenFuture, "All must put learned spells and available actions before unlearned spells") end
+        end
+    end
+end
+assert(seenFuture)
+print("PASS: learned-first ordering across categories and pages, with available actions before unlearned spells in All")
+
+-- Every physical region selects its real button number without changing the
+-- binding. Modifier tabs operate on the same selected mouse button.
+ns.ShowOptions()
+local mouse = AggeHealBotSettings.mouse
+assert(mouse.width == 315 and mouse.height == 264)
+assert(mouse.body.texture == "Interface\\TutorialFrame\\UI-TUTORIAL-FRAME"
+    and mouse.body.texCoords[1] == 0.1542969 and mouse.body.texCoords[3] == 0.4257813,
+    "neutral mouse must use the actual neutral tutorial sprite, not grey a selected button")
+assert(mouse.buttons[1].overlay.texCoords[3] == 0.4257813)
+assert(mouse.buttons[2].overlay.texCoords[3] == 0.6269531)
+assert(mouse.buttons[3].overlay.texture == "Interface\\AddOns\\AggeHealBot\\Media\\MouseSideGlow",
+    "Middle highlights only the wheel instead of replacing the whole mouse")
+for index, button in ipairs(mouse.buttons) do
+    assert(button.pulse.looping == "BOUNCE" and button.pulse.animation.duration == 0.8
+        and button.pulse.animation.fromAlpha == 0 and button.pulse.animation.toAlpha == (index == 3 and 0.65 or 1)
+        and button.pulse.animation.smoothing == "IN_OUT", "mouse click cues match the tutorial fade")
+end
+assert(mouse.buttons[4].point[2] >= mouse.art.point[2] and mouse.buttons[5].point[2] >= mouse.art.point[2],
+    "side buttons must sit on the mouse shell rather than in external boxes")
+assert(not mouse.buttons[1].icon.shown and not mouse.buttons[3].icon.shown,
+    "spell icons must not cover the physical mouse controls")
+for modifier, tab in ipairs(AggeHealBotSettings.tabs) do
+    tab.scripts.OnClick(tab)
+    for index, button in ipairs(mouse.buttons) do
+        button.scripts.OnClick(button)
+        assert(AggeHealBotSpellPicker.button == index and AggeHealBotSpellPicker.prefix == ns.modifiers[modifier].prefix)
+        assert(mouse.captionTitle.text == ns.buttons[index])
+        for other, region in ipairs(mouse.buttons) do
+            assert(region.selected == (other == index), "only the selected physical button should glow")
+            assert(region.overlay.alpha == (other == index and 1 or 0))
+            assert(region.pulse.playing == (other == index), "only the selected physical button should animate")
+        end
+    end
+end
+assert(mouse.buttons[4].point[3] < mouse.buttons[5].point[3], "thumb back button sits below thumb forward")
+AggeHealBotSettings.tabs[1].scripts.OnClick()
+mouse.buttons[3].scripts.OnClick(mouse.buttons[3])
+AggeHealBotSpellPicker.search:SetText("Holy Light")
+AggeHealBotSpellPicker.rows[1].scripts.OnClick(AggeHealBotSpellPicker.rows[1])
+assert(PlayerFrame.attrs.spell3 == "Holy Light", "clicking the wheel must edit Middle, not Right")
+assert(mouse.caption.text == "Holy Light" and mouse.buttons[3].icon.texture == 100639)
+mouse.buttons[3].scripts.OnEnter(mouse.buttons[3])
+assert(GameTooltip.lines[1] == "Middle" and GameTooltip.lines[2] == "Holy Light")
+mouse.buttons[3].scripts.OnLeave(mouse.buttons[3])
+assert(not GameTooltip.shown)
+AggeHealBotSettings.tabs[2].scripts.OnClick()
+mouse.buttons[3].scripts.OnEnter(mouse.buttons[3])
+assert(GameTooltip.lines[1] == "Shift + Middle" and GameTooltip.lines[2] == mouse.caption.text,
+    "mouse hover and caption follow the active modifier")
+mouse.buttons[3].scripts.OnLeave(mouse.buttons[3])
+local currentPulsePlays = mouse.buttons[3].pulse.plays
+mouse.buttons[3].scripts.OnClick(mouse.buttons[3])
+assert(mouse.buttons[3].pulse.plays == currentPulsePlays, "refreshing the same selection must not restart the pulse")
+mouse:Hide()
+for _, button in ipairs(mouse.buttons) do assert(not button.pulse.playing, "hidden mouse diagrams must stop animating") end
+mouse:Show()
+assert(mouse.buttons[3].pulse.playing, "showing the diagram restores the current selection's animation")
+for index, button in ipairs(mouse.buttons) do
+    assert(button.callout.icon.texture == button.bindingIcon and button.callout.icon.alpha == button.bindingAlpha,
+        "all five side callouts must show the current assigned icon and learned status")
+    assert(button.callout.title.text == ns.buttons[index])
+    button.callout.scripts.OnClick(button.callout)
+    assert(AggeHealBotSpellPicker.button == index and mouse.captionTitle.text == ns.buttons[index],
+        "icon callouts must select the same binding as physical mouse controls")
+    button.callout.scripts.OnEnter(button.callout)
+    assert(GameTooltip.owner == button.callout and GameTooltip.lines[2] == mouse.caption.text)
+    button.scripts.OnLeave(button)
+    assert(GameTooltip.shown, "a late leave from the physical button must not hide its icon callout tooltip")
+    button.callout.scripts.OnLeave(button.callout)
+    assert(not GameTooltip.shown)
+end
+assert(mouse.buttons[1].callout.point[2] + 16 + 26 < mouse.art.point[2]
+    and mouse.buttons[2].callout.point[2] + 16 > mouse.art.point[2] + mouse.art.width,
+    "spell icons must sit outside both sides of the mouse")
+assert(-AggeHealBotSettings.blessings.point[3] - (-mouse.point[3] + mouse.height) >= 10,
+    "mouse illustration must leave space before the blessing button")
+print("PASS: five-button mouse hit regions, all modifier combinations, single selection highlight, wheel rebinding, live icons/caption and hover")

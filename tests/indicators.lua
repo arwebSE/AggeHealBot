@@ -24,6 +24,7 @@ local function region()
     function r:SetTexture(texture) self.texture = texture end
     function r:SetColorTexture() end
     function r:SetVertexColor() end
+    function r:SetAlpha(value) self.alpha = value end
     function r:SetTexCoord(...) self.texCoord = {...} end
     function r:Show() self.shown = true end
     function r:Hide() self.shown = false end

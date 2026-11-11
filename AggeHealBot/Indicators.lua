@@ -6,6 +6,9 @@ local colors = {
     [1243] = {1, 0.85, 0.45},     -- Fortitude
     [14752] = {0.55, 0.75, 1},    -- Divine Spirit
     [976] = {0.6, 0.3, 0.95},     -- Shadow Protection
+    [19740] = {1, 0.65, 0.2},     -- Might
+    [19742] = {0.45, 0.7, 1},     -- Wisdom
+    [20217] = {1, 0.85, 0.4},     -- Kings
 }
 local fallbackColor = {0.5, 1, 0.65}
 
@@ -148,7 +151,7 @@ end
 
 -- Regions on the existing stock frame: no extra clickable frame intercepts heals.
 -- Texture visibility can change in combat without touching protected buttons.
-function A.UpdateBuffIndicator(frame, spell, spellID, resurrection)
+function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
     local view = indicators[frame]
     if not spell then
         if view then
@@ -195,9 +198,10 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection)
     end
     local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID or spell)
     view.icon:SetTexture(info and info.iconID or 134400)
+    view.icon:SetAlpha(problem and 0.4 or 1)
     local color = resurrection == "cure" and {1, 0.3, 0.25} or resurrection and {0.65, 0.95, 1} or colors[spellID] or fallbackColor
     view.background:SetColorTexture(color[1], color[2], color[3], 1)
-    A.SetGlow(view.glow, color, true)
+    A.SetGlow(view.glow, color, not problem)
     if view.glow.badgeAnchor and view.glow.badgeOffsetY then
         -- Account for the cap's transparent blur padding, keeping a three-unit
         -- gap outside the visible panel corner rather than PlayerFrame bounds.

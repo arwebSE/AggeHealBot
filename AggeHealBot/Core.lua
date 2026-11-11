@@ -15,18 +15,10 @@ local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
     combatResurrection = false, playerFrame = true, targetFrame = true,
     rightClickMenu = false, hideRaidControls = true,
+    showUnlearned = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
-local function EnsureExplicitTargeting()
-    if InCombatLockdown() then return end
-    local get = C_CVar and C_CVar.GetCVar or GetCVar
-    local set = C_CVar and C_CVar.SetCVar or SetCVar
-    if get and set and get("autoSelfCast") ~= "0" then
-        set("autoSelfCast", "0")
-        Print("Auto Self Cast turned off: failed heals stay on the clicked unit instead of falling back to you.")
-    end
-end
 local function SpellName(id)
     if not names[id] then
         if C_Spell and C_Spell.GetSpellInfo then
@@ -48,8 +40,13 @@ local function ReadSpellbook()
                     local item = C_SpellBook.GetSpellBookItemInfo(slot, bank)
                     local name = item and item.spellID and SpellName(item.spellID)
                     if name then
-                        learned[name] = true
-                        spellDetails[name] = {id = item.spellID, passive = item.isPassive == true}
+                        local future = Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell ~= nil
+                            and item.itemType == Enum.SpellBookItemType.FutureSpell
+                        if not future then learned[name] = true end
+                        local previous = spellDetails[name]
+                        if not previous or not future then
+                            spellDetails[name] = {id = item.spellID, passive = item.isPassive == true, future = future}
+                        end
                     end
                 end
             end
@@ -74,6 +71,19 @@ local function Resolve(ids)
         if name and (learned[name] or (IsPlayerSpell and IsPlayerSpell(id))) then return name end
     end
 end
+local function CandidateName(ids)
+    for _, id in ipairs(ids) do
+        local name = SpellName(id)
+        if name then return name end
+    end
+end
+local function IsLearned(name, spellID)
+    if learned[name] or (spellID and IsPlayerSpell and IsPlayerSpell(spellID)) then return true end
+    for id, spellName in pairs(names) do
+        if spellName == name and IsPlayerSpell and IsPlayerSpell(id) then return true end
+    end
+    return false
+end
 local function BuildBindings()
     ReadSpellbook()
     wipe(bindings)
@@ -84,7 +94,7 @@ local function BuildBindings()
                 label = b[1], prefix = b[2], button = b[3],
                 action = type(b[4]) == "string" and b[4] or "spell",
                 spell = type(b[4]) == "table" and Resolve(b[4]) or nil,
-                expected = type(b[4]) == "table" and SpellName(b[4][1]) or nil,
+                expected = type(b[4]) == "table" and CandidateName(b[4]) or nil,
             }
         end
     end
@@ -95,8 +105,13 @@ local function BuildBindings()
                 button = button, action = (key == "1" and "target" or "none")}
             local custom = AggeHealBotDB.bindings[key]
             if custom then
-                b.action, b.spell, b.expected = custom.action, custom.spell, nil
+                local name = custom.spellID and SpellName(custom.spellID) or custom.spell
+                b.action = custom.action
+                b.spell = custom.action == "spell" and name and IsLearned(name, custom.spellID) and name or nil
+                b.expected = custom.action == "spell" and name or nil
             end
+            -- An unsupported/missing spell identity is not an unlearned spell.
+            if b.action == "spell" and not b.spell and not b.expected then b.action = "none" end
             bindings[#bindings + 1] = b
         end
     end
@@ -213,13 +228,27 @@ local function BuffSatisfied(group, definition, ourRank, auras)
     end
     return false
 end
+local function PaladinBuffGroups(unit)
+    local ok, _, targetClass = pcall(UnitClass, unit)
+    if not ok or secret(targetClass) or type(targetClass) ~= "string" then return {} end
+    local rule = A.GetPaladinRule(targetClass)
+    if rule == "off" then return {} end
+    if rule == "auto" then
+        rule = (targetClass == "WARRIOR" or targetClass == "ROGUE") and "might" or "wisdom"
+        local group = A.paladinBlessings[rule]
+        if not Resolve(A.buffRanks[group[1]].ranks) then rule = "kings" end
+    end
+    local group = A.paladinBlessings[rule]
+    return group and {group} or {}
+end
 local function MissingBuff(unit)
     if not AggeHealBotDB.smartBuffs or not unit or not UnitExists(unit)
         or not UnitCanAssist("player", unit) or UnitIsDeadOrGhost(unit) then return end
     local present, evidence, auras = HelpfulAuras(unit)
     if not present then return end
     local guid = UnitKey(unit)
-    for _, group in ipairs(A.buffs[class] or {}) do
+    local groups = class == "PALADIN" and PaladinBuffGroups(unit) or A.buffs[class] or {}
+    for _, group in ipairs(groups) do
         local definition = A.buffRanks[group[1]]
         local name = Resolve({group[1]}) or (definition and Resolve(definition.ranks))
         local exists = name and BuffSatisfied(group, definition, LearnedBuffRank(definition, name), auras)
@@ -318,6 +347,13 @@ local function CastMacro(spell, combatSpell, explicitUnit)
     end
     return "/cast [@" .. target .. ",help,nodead] " .. spell .. "\n/stopspelltarget"
 end
+local function TargetMacro(frame)
+    -- Native UnitFrame click-binding routing can discard type="target" when
+    -- no Blizzard interaction binding exists for this modifier/button. An
+    -- explicit secure macro keeps targeting within our own saved bindings.
+    local unit = frame == PlayerFrame and "player" or frame == A.targetButton and "target" or "mouseover"
+    return "/target [@" .. unit .. ",exists]"
+end
 local function MenuButton(frame)
     local state = frames[frame]
     if not state.menuButton then
@@ -349,7 +385,6 @@ local function MenuButton(frame)
 end
 local function BindingAction(frame, binding)
     if (frame == PlayerFrame or frame == A.targetButton) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
-    if (frame == PlayerFrame or frame == A.targetButton) and binding.prefix == "shift-" and binding.button == 1 then return "settings" end
     return binding.action
 end
 local function ShowFrameTooltip(frame)
@@ -360,7 +395,6 @@ local function ShowFrameTooltip(frame)
         if addonTooltip then addonTooltip:Hide() end
         return
     end
-    local portrait = frame == PlayerFrame and AggeHealBotDB.playerFrame
     local unit = Unit(frame)
     -- Use an addon-owned tooltip for every supported unit frame. SetUnit would
     -- enable automatic unit-data refreshes that can replace custom lines.
@@ -405,13 +439,16 @@ local function ShowFrameTooltip(frame)
         label:SetFontObject(GameFontHighlightSmall)
         label:SetTextColor(0.5, 1, 0.7)
     end
-    local shiftOnly = IsShiftKeyDown and IsShiftKeyDown()
-        and not (IsControlKeyDown and IsControlKeyDown())
-        and not (IsAltKeyDown and IsAltKeyDown())
-    if (portrait or frame == A.targetButton) and shiftOnly then
-        tooltip:AddLine("Shift + Left Click to open AggeHealBot Menu.", 1, 1, 1)
-        tooltip:Show()
-        return
+    local prefix = (IsAltKeyDown and IsAltKeyDown() and "alt-" or "")
+        .. (IsControlKeyDown and IsControlKeyDown() and "ctrl-" or "")
+        .. (IsShiftKeyDown and IsShiftKeyDown() and "shift-" or "")
+    if prefix ~= "" then
+        for _, binding in ipairs(bindings) do
+            if binding.prefix == prefix and BindingAction(frame, binding) == "settings" then
+                tooltip:AddLine(binding.label .. " Click to open AggeHealBot Menu.", 1, 1, 1)
+                break
+            end
+        end
     end
     if InCombatLockdown() and state.combatResActive then
         tooltip:AddLine("Left click: " .. state.combatResSpell .. " (combat resurrection)", 0.65, 0.95, 1)
@@ -423,19 +460,23 @@ local function ShowFrameTooltip(frame)
             if binding.spell == state.combatCureSpell and BindingAction(frame, binding) == "spell" then shortcut = binding.label; break end
         end
         tooltip:AddLine(shortcut and ("Cast with " .. shortcut) or "Bind this cure in /ahb to cast it in combat.", 1, 1, 1)
-    elseif not InCombatLockdown() and state.nextBuff then
+    elseif prefix == "" and not InCombatLockdown() and state.nextBuff then
         tooltip:AddLine((state.resurrection and "Resurrect with left click: " or state.cure and "Cure with left click: " or "Next left click: ") .. state.nextBuff, 0.65, 1, 0.65)
         if state.cure then tooltip:AddLine(state.cure, 1, 0.6, 0.5) end
-    elseif not InCombatLockdown() and state.blockedBuff then
-        tooltip:AddLine(state.blockedBuff .. ": out of range / unavailable", 1, 0.4, 0.3)
-        tooltip:AddLine("Left click blocked until this unit is in range.", 1, 0.7, 0.4)
+    elseif prefix == "" and not InCombatLockdown() and state.blockedBuff then
+        tooltip:AddLine(state.blockedBuff .. ": " .. (A.CastProblem(state.blockedBuff, unit) or "Range unavailable"), 1, 0.4, 0.3)
+        tooltip:AddLine("Left click blocked until range is confirmed.", 1, 0.7, 0.4)
+    elseif prefix == "" and not InCombatLockdown() and state.healingFirst then
+        tooltip:AddLine("Healing first: below 90% health.", 0.65, 1, 0.65)
     end
     for _, b in ipairs(bindings) do
-        if b.prefix == "" then
+        if b.prefix == prefix then
             local action = BindingAction(frame, b)
             local value = action == "spell" and (b.spell or b.expected) or A.actionLabels[action] or action
-            if b.button == 1 and not InCombatLockdown() then value = state.nextBuff or value end
-            if b.button == 1 and InCombatLockdown() and state.combatResActive then value = state.combatResSpell end
+            if b.button == 1 and prefix == "" and not InCombatLockdown() then value = state.nextBuff or value end
+            if b.button == 1 and prefix == "" and InCombatLockdown() and state.combatResActive then value = state.combatResSpell end
+            local problem = action == "spell" and b.spell and A.CastProblem(b.button == 1 and prefix == "" and state.nextBuff or b.spell, unit)
+            if problem then value = value .. " |cffffb366(" .. problem .. ")|r" end
             tooltip:AddDoubleLine(b.label, value .. (action == "spell" and not b.spell and " (not learned)" or ""), 1, 1, 1, 0.6, 0.9, 0.7)
         end
     end
@@ -456,6 +497,12 @@ local function HookHover(frame, region)
         if addonTooltip and addonTooltip:IsOwned(frame) then addonTooltip:Hide() end
         if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
     end)
+end
+local function RefreshHint(frame)
+    local state = frames[frame]
+    if not state or InCombatLockdown() then return end
+    A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and state.nextBuff or nil,
+        state.nextBuffID, state.watchKind, state.nextBuff and A.CastProblem(state.nextBuff, Unit(frame)))
 end
 Apply = function(frame)
     if not ready or InCombatLockdown() then return end
@@ -503,8 +550,7 @@ Apply = function(frame)
     Set(frame, "checkselfcast", false)
     Set(frame, "checkfocuscast", false)
     for _, b in ipairs(bindings) do
-        -- A portrait-only shortcut; party/raid frames retain the user's spell
-        -- bindings. Install it before combat through the existing click delegate.
+        -- All shortcuts, including modifier-click menus, use saved bindings.
         local bindingAction = BindingAction(frame, b)
         local key = b.prefix .. "type" .. b.button
         local plainLeft = b.prefix == "" and b.button == 1
@@ -529,12 +575,14 @@ Apply = function(frame)
                     frames[frame].bindingDrivers[key] = expression
                 end
             else
-                Set(frame, key, action)
+                Set(frame, key, action == "target" and "macro" or action)
             end
         end
         if not (b.prefix == "" and b.button == 1) then
             Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
-            Set(frame, b.prefix .. "macrotext" .. b.button, bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, frame == A.targetButton and "target" or nil) or nil)
+            local macro = bindingAction == "target" and TargetMacro(frame)
+                or bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, frame == A.targetButton and "target" or nil) or nil
+            Set(frame, b.prefix .. "macrotext" .. b.button, macro)
         end
     end
     local heal, left
@@ -546,7 +594,9 @@ Apply = function(frame)
     local buff, buffID, evidence
     local unit = Unit(frame)
     local watches = WatchAllowed(unit) and left.action == "spell"
-    if watches then buff, buffID, evidence = MissingBuff(unit) end
+    frames[frame].canHealFirst = watches and heal ~= nil
+    frames[frame].healingFirst = frames[frame].canHealFirst and A.NeedsHealing(unit) or false
+    if watches and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit) end
     frames[frame].unitDead = ReadFlag(UnitIsDeadOrGhost, unit)
     local normalResIDs = A.resurrections[class] or {}
     local combatResIDs = A.combatResurrections[class] or {}
@@ -596,6 +646,10 @@ Apply = function(frame)
         Set(frame, "macrotext1", #clauses > 0 and ("/cast " .. table.concat(clauses, "; ") .. "\n/stopspelltarget") or nil)
     end
     local action = (left.action == "settings" or left.action == "togglemenu") and "click" or left.action
+    if action == "target" then
+        action = "macro"
+        Set(frame, "macrotext1", TargetMacro(frame))
+    end
     if action == "spell" then action = heal and "macro" or "none" end
     if combatRes then action = "macro" end
     local healBlocked = left.action == "spell" and heal and not buff and HealOutOfRange(heal, Unit(frame))
@@ -606,8 +660,11 @@ Apply = function(frame)
         frames[frame].typeDriver = typeDriver
     end
     frames[frame].nextBuff = buff
+    frames[frame].nextBuffID = buffID
+    frames[frame].watchKind = res and "resurrection" or cure and "cure" or nil
     -- Use the same decision as the secure click binding, never a separate scan.
-    A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and buff or nil, buffID, res and "resurrection" or cure and "cure" or nil)
+    A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and buff or nil, buffID,
+        frames[frame].watchKind, buff and A.CastProblem(buff, unit))
 end
 local function Register(frame)
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
@@ -738,6 +795,8 @@ local function Queue()
     C_Timer.After(0, function() queued = false; refresh() end)
 end
 A.GetBindings = function() return bindings end
+A.GetPlayerClass = function() return class end
+A.IsSpellLearned = IsLearned
 local function Passive(id, detail)
     if detail and detail.passive then return true end
     return id and C_Spell and C_Spell.IsSpellPassive and C_Spell.IsSpellPassive(id) == true
@@ -756,7 +815,7 @@ A.GetSpells = function()
     table.sort(list)
     return list
 end
-A.GetSpellChoices = function()
+A.GetSpellChoices = function(includeUnlearned)
     local categoryByName = {}
     for category, ids in pairs(A.spellCategories) do
         for _, id in ipairs(ids) do
@@ -764,14 +823,28 @@ A.GetSpellChoices = function()
             if name then categoryByName[name] = category end
         end
     end
-    local choices = {}
+    local choices, seen = {}, {}
+    local function Add(name, id, unlearned)
+        if not name or seen[name] or Passive(id, spellDetails[name]) then return end
+        seen[name] = true
+        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id or name)
+        choices[#choices + 1] = {label = name, spell = name, spellID = id, action = "spell",
+            category = categoryByName[name] or "other", icon = info and info.iconID, unlearned = unlearned == true}
+    end
     for _, name in ipairs(A.GetSpells()) do
         local detail = spellDetails[name]
-        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(detail and detail.id or name)
-        choices[#choices + 1] = {label = name, spell = name, action = "spell", category = categoryByName[name] or "other", icon = info and info.iconID}
+        Add(name, detail and detail.id, false)
+    end
+    if includeUnlearned then
+        for _, id in ipairs(A.classSpells[class] or {}) do
+            local name = SpellName(id)
+            local detail = name and spellDetails[name]
+            Add(name, detail and detail.id or id, name and not IsLearned(name, id))
+        end
     end
     local order = {heals = 1, buffs = 2, utility = 3, other = 4}
     table.sort(choices, function(a, b)
+        if a.unlearned ~= b.unlearned then return not a.unlearned end
         if a.category ~= b.category then return order[a.category] < order[b.category] end
         return a.label < b.label
     end)
@@ -785,11 +858,13 @@ A.SaveBinding = function(prefix, button, action, spell)
     else
         if not A.actionLabels[action] then return false end
         if action == "spell" then
-            local valid = false
-            for _, name in ipairs(A.GetSpells()) do if name == spell then valid = true end end
-            if not valid then return false end
+            local choice
+            for _, item in ipairs(A.GetSpellChoices(AggeHealBotDB.showUnlearned)) do if item.spell == spell then choice = item; break end end
+            if not choice then return false end
+            AggeHealBotDB.bindings[prefix .. button] = {action = action, spell = spell, spellID = choice.spellID}
+        else
+            AggeHealBotDB.bindings[prefix .. button] = {action = action}
         end
-        AggeHealBotDB.bindings[prefix .. button] = {action = action, spell = action == "spell" and spell or nil}
     end
     -- Keep the displayed bindings consistent with the active secure attributes in combat.
     if not InCombatLockdown() then BuildBindings() end
@@ -797,8 +872,9 @@ A.SaveBinding = function(prefix, button, action, spell)
     return true
 end
 A.SetOption = function(key, value)
-    if key ~= "smartBuffs" and key ~= "playerFrame" and key ~= "targetFrame" and key ~= "rightClickMenu" and key ~= "combatResurrection" and key ~= "cureWatch" and key ~= "combatCures" and key ~= "hideRaidControls" then return end
+    if optionDefaults[key] == nil then return end
     AggeHealBotDB[key] = value and true or false
+    if key == "showUnlearned" then return end
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end
@@ -809,8 +885,24 @@ A.ResetBindings = function()
 end
 A.ResetOptions = function()
     for key, value in pairs(optionDefaults) do AggeHealBotDB[key] = value end
+    AggeHealBotDB.paladinBlessings = nil
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
+end
+A.GetPaladinRule = function(targetClass)
+    local rule = AggeHealBotDB.paladinBlessings and AggeHealBotDB.paladinBlessings[targetClass]
+    return (rule == "off" or A.paladinBlessings[rule]) and rule or "auto"
+end
+A.SetPaladinRule = function(targetClass, rule)
+    if class ~= "PALADIN" or (rule ~= "auto" and rule ~= "off" and not A.paladinBlessings[rule]) then return false end
+    local valid
+    for _, token in ipairs(A.paladinClasses) do if token == targetClass then valid = true end end
+    if not valid then return false end
+    AggeHealBotDB.paladinBlessings = AggeHealBotDB.paladinBlessings or {}
+    AggeHealBotDB.paladinBlessings[targetClass] = rule ~= "auto" and rule or nil
+    wipe(rejectedBuffs)
+    Queue()
+    return true
 end
 local function ShowSettings() if ready and A.ShowOptions then A.ShowOptions() end end
 A.settingsButton = CreateFrame("Button", "AggeHealBotOpenSettings", UIParent)
@@ -832,7 +924,7 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
@@ -847,7 +939,6 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         local token
         token, class = UnitClass("player")
         ready = true
-        EnsureExplicitTargeting()
         BuildBindings()
         refresh()
         -- Movement and secrecy transitions need not emit UNIT_AURA. Poll
@@ -870,6 +961,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
                 Queue()
                 return
             end
+            if hoveredFrame and frames[hoveredFrame] then
+                RefreshHint(hoveredFrame)
+                ShowFrameTooltip(hoveredFrame)
+            end
             for frame, state in pairs(frames) do
                 if state.candidateBuff then
                     local blocked = not BuffInRange(state.candidateBuff, Unit(frame))
@@ -882,12 +977,21 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         end)
         Print("v" .. A.version .. " loaded. /ahb for bindings and settings.")
     elseif ready then
+        if event == "UNIT_POWER_UPDATE" or event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_COOLDOWN" then
+            if InCombatLockdown() or (event == "UNIT_POWER_UPDATE" and (secret(arg) or arg ~= "player")) then return end
+            -- Mana and cooldown ticks update hints, not aura scans or secure
+            -- bindings. Only roster, aura and priority changes need a rebuild.
+            for frame in pairs(frames) do RefreshHint(frame) end
+            if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
+            return
+        end
         if event == "UNIT_HEALTH" then
             if InCombatLockdown() or secret(arg) then return end
             local dead = ReadFlag(UnitIsDeadOrGhost, arg)
             local changed = false
             for frame, state in pairs(frames) do
-                if Unit(frame) == arg and state.unitDead ~= dead then changed = true; break end
+                if Unit(frame) == arg and (state.unitDead ~= dead
+                    or state.healingFirst ~= (state.canHealFirst and A.NeedsHealing(arg))) then changed = true; break end
             end
             if not changed then return end
         end
@@ -938,7 +1042,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             pendingBuffAttempt = nil
             if not InCombatLockdown() then BuildBindings() end
         end
-        if event == "PLAYER_REGEN_ENABLED" then EnsureExplicitTargeting(); BuildBindings() end
+        if event == "PLAYER_REGEN_ENABLED" then BuildBindings() end
         -- Never inspect auras, unit health, or protected attributes in combat.
         if not InCombatLockdown() then Queue() end
         if event == "MODIFIER_STATE_CHANGED" and hoveredFrame then ShowFrameTooltip(hoveredFrame) end

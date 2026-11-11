@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.6 — 2026-11-11
+
+- Add smooth mouse texture scaling, a wheel-sized red highlight and a compact editor layout with clean spell icons around the mouse.
+- Tighten mouse-editor spacing and add clickable spell/action icon callouts on both sides. Keep the selected icon and full spell name centered below the mouse.
+- Default Shift + right-click to the unit context menu and Shift + middle-click to AggeHealBot settings; custom bindings still override both.
+- Replace the binding list with Blizzard's classic tutorial mouse sprites and 0.8-second fading click animation, including a red wheel state. Draw numbered side buttons on the shell and show the selected spell icon/name below the graphic, preserving all modifier bindings and spell-picker behavior.
+- Remove the priest right-click Lesser Heal fallback so low-level default left and right bindings do not duplicate the same heal. Right-click activates when Heal or Greater Heal is learned.
+- List every learned spell before unlearned spells, preserving category priority within each group. All also places available actions before unlearned spells.
+- Include Target, Assist, menus and Disabled in All alongside every spell, while respecting Show unlearned.
+- Remove the Other category tab; its spells remain available under All. Widen the remaining tab labels.
+- Default Shift + Button 4 to Assist and leave Shift + Button 5 unassigned, removing the redundant side-button Target shortcut.
+- Resolve alternative preset spell IDs before labeling an unlearned binding; show Disabled when no spell identity exists instead of the generic Spell placeholder.
+- Default the spell picker to Suggested (heals, buffs and utility), and move All to the rightmost category tab.
+- Add an optional Show unlearned checkbox to the spell picker, off by default. Unlearned support spells are dimmed with hover explanations and can be bound in advance; saved bindings activate when the spell is learned.
+- Replace cycling blessing buttons with native dropdowns, padded class-colored names and class icons. Separate footer controls and let Paladin blessings toggle back to the binding picker.
+- Execute Target unit bindings through explicit secure targeting macros so Blizzard's click-binding interaction filter cannot discard Shift + left-click, including on the player frame.
+- Add paladin blessing watching with class-specific suggestions and editable Auto, Might, Wisdom, Kings or Off rules. Druids default to Wisdom regardless of form; users can choose another blessing for their class. Greater blessings satisfy equal or weaker single-target ranks without automatically casting reagent-consuming group buffs.
+- Prefer the assigned heal over missing buffs below 90% health when health data is readable, preserving cure and resurrection priority.
+- Show out-of-combat range, mana/power, cooldown and availability hints. Dim unavailable watcher icons and pause their glow without changing protected combat casts.
+- Keep Blizzard's global Auto Self Cast preference unchanged; frame clicks retain explicit targeting and cursor cleanup.
+- Default Shift + left-click to target on supported frames. Modifier shortcuts are ordinary editable bindings, and modifier hover shows the saved assignments.
+- Use AggeHealBot's spellbook-and-cursor artwork in the addon list instead of the default healing spell icon.
+
 ## 1.0.5 — 2026-11-11
 
 - Offer watched buff upgrades when the target has a weaker known rank; suppress equal or stronger ranks, including equivalent group buffs. Leave unknown matching ranks alone and retain stronger-conflict rejection handling.
