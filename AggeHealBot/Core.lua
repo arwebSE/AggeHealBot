@@ -154,7 +154,7 @@ local function HelpfulAuras(unit)
         local key = aura.auraInstanceID or (aura.spellId and ("spell:" .. aura.spellId)) or aura.name
         if key then evidence[key] = true end
     end
-    return present, evidence
+    return present, evidence, auras
 end
 local function UnitKey(unit)
     local guid = UnitGUID(unit)
@@ -177,19 +177,52 @@ local function RejectedBuffStillActive(guid, spell, evidence)
     if not hasEvidence and next(evidence) then list[spell] = nil; return false end
     return true
 end
+local function BuffRank(definition, id)
+    if not definition or not id then return end
+    for rank, spellID in ipairs(definition.ranks) do
+        if spellID == id then return rank end
+    end
+    return definition.equivalents and definition.equivalents[id]
+end
+local function LearnedBuffRank(definition, name)
+    if not definition then return end
+    local highest
+    local detail = spellDetails[name]
+    for rank, id in ipairs(definition.ranks) do
+        -- A learned name alone cannot identify its rank. Do not count learned
+        -- group buffs: the watcher casts the single-target spell by name.
+        if (detail and detail.id == id) or (IsPlayerSpell and IsPlayerSpell(id)) then highest = rank end
+    end
+    return highest
+end
+local function BuffSatisfied(group, definition, ourRank, auras)
+    local matchingNames = {}
+    for _, id in ipairs(group) do
+        local name = SpellName(id)
+        if name then matchingNames[name] = true end
+    end
+    for _, aura in ipairs(auras) do
+        local rank = BuffRank(definition, aura.spellId)
+        if rank then
+            if not ourRank or rank >= ourRank then return true end
+        else
+            local canonical = aura.spellId and SpellName(aura.spellId)
+            -- Unknown rank/equivalent strength is not evidence of an upgrade.
+            if matchingNames[aura.name] or (canonical and matchingNames[canonical]) then return true end
+        end
+    end
+    return false
+end
 local function MissingBuff(unit)
     if not AggeHealBotDB.smartBuffs or not unit or not UnitExists(unit)
         or not UnitCanAssist("player", unit) or UnitIsDeadOrGhost(unit) then return end
-    local present, evidence = HelpfulAuras(unit)
+    local present, evidence, auras = HelpfulAuras(unit)
     if not present then return end
     local guid = UnitKey(unit)
     for _, group in ipairs(A.buffs[class] or {}) do
-        local name = Resolve({group[1]})
-        local exists = false
-        for _, id in ipairs(group) do
-            local buffName = SpellName(id)
-            if buffName and present[buffName] then exists = true end
-        end
+        local definition = A.buffRanks[group[1]]
+        local name = Resolve({group[1]}) or (definition and Resolve(definition.ranks))
+        local exists = name and BuffSatisfied(group, definition, LearnedBuffRank(definition, name), auras)
         if name and not exists and not RejectedBuffStillActive(guid, name, evidence) then return name, group[1], evidence end
     end
 end

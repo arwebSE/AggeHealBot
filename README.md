@@ -53,9 +53,13 @@ Missing-buff priority is **on by default**. It applies only outside combat and o
 - Druid: Mark of the Wild, then Thorns. Gift of the Wild satisfies Mark.
 - Priest: Fortitude, Divine Spirit and Shadow Protection, when learned. Their group versions satisfy the corresponding buff.
 
+Automatic buff watching currently covers these druid and priest buffs. Paladin blessings and shaman buffs can be assigned manually, but do not yet have automatic missing-buff rules. Cure and resurrection watching support all four healer classes.
+
 Once the unit has its buffs, left click returns to its assigned spell. The buff icon and outline disappear when buffs are complete, combat begins, a modifier is held or buff priority is turned off. Unreachable buff targets are blocked instead of falling through to another spell.
 
-Higher-rank auras are recognized through their canonical spell names, even when the displayed aura name differs. If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
+The watcher compares your highest learned single-target buff rank with the active buff's spell ID. A weaker known rank gets an upgrade icon, glow and left-click action. An equal or stronger rank satisfies the watcher, including equivalent group buffs such as Gift of the Wild and the priest Prayers. Unknown ranks with a matching buff name are left alone rather than assumed weaker.
+
+If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
 Target-frame click healing and buff watching are **on by default** and can be switched off in `/ahb`.
 

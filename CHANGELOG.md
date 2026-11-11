@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5 — 2026-11-11
+
+- Offer watched buff upgrades when the target has a weaker known rank; suppress equal or stronger ranks, including equivalent group buffs. Leave unknown matching ranks alone and retain stronger-conflict rejection handling.
+- Recognize Forever's Penance, Light's Vigil, and additional Wild Growth, Prayer of Mending and Riptide ranks as healing spells.
+- Prefer current Forever Prayer of Mending, Holy Shock and Riptide IDs in class binding presets, retaining older fallback IDs.
+- Recognize every current single-target resurrection and Rebirth rank explicitly, including when an older base-ID lookup is unavailable.
+- Fix priest cure watching incorrectly offering Dispel Magic for diseases; use Cure Disease or Abolish Disease instead.
+- Categorize greater paladin blessings as buffs and document the current automatic buff-watch coverage.
+
 ## 1.0.4 — 2026-11-11
 
 - Add an optional Right-click menu override for player and target frames, off by default. Party and raid frames use their assigned right-click bindings. Modifier-click bindings are independent.

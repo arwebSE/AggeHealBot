@@ -1126,3 +1126,105 @@ deadUnits.target = true
 event("UNIT_HEALTH", "target")
 assert(targetButton.attrs.spell1 == "Forever Revive", "resurrection watch must recognize the learned Forever rank without the old spell ID")
 print("PASS: scoped player/target right-click menus and Forever-ranked Revive in Utility and resurrection watching")
+
+-- Exercise actual class selection and watch priority with only the highest
+-- resurrection rank available, rather than assuming a base-ID lookup succeeds.
+AggeHealBotDB.bindings = {}
+AggeHealBotDB.smartBuffs = false
+local cases = {
+    {class = "PRIEST", healID = 2061, heal = "Flash Heal", resID = 20770, res = "Resurrection", cureID = 527, cure = "Dispel Magic", kind = "Magic"},
+    {class = "PALADIN", healID = 19750, heal = "Flash of Light", resID = 20773, res = "Redemption", cureID = 4987, cure = "Cleanse", kind = "Poison"},
+    {class = "SHAMAN", healID = 331, heal = "Healing Wave", resID = 20777, res = "Ancestral Spirit", cureID = 526, cure = "Cure Poison", kind = "Poison"},
+}
+for _, case in ipairs(cases) do
+    UnitClass = function() return case.class, case.class end
+    for _, pair in ipairs({{case.healID, case.heal}, {case.resID, case.res}, {case.cureID, case.cure}}) do
+        spellNames[pair[1]], known[pair[1]] = pair[2], pair[2]
+    end
+    C_SpellBook.GetSpellBookItemInfo = function(slot)
+        return ({ {spellID = case.healID}, {spellID = case.resID}, {spellID = case.cureID} })[slot]
+    end
+    harmful.target = {}
+    deadUnits.target = true
+    event("PLAYER_LOGIN")
+    assert(targetButton.attrs.spell1 == case.res, case.class .. " must recognize the learned high-rank resurrection")
+    deadUnits.target = false
+    harmful.target = {{name = "Test debuff", dispelName = case.kind}}
+    event("UNIT_AURA", "target")
+    assert(targetButton.attrs.spell1 == case.cure, case.class .. " must select its learned matching cure")
+    if case.class == "PRIEST" then
+        harmful.target = {{name = "Fever", dispelName = "Disease"}}
+        event("UNIT_AURA", "target")
+        assert(targetButton.attrs.spell1 == case.heal, "Dispel Magic cannot cure Disease")
+        spellNames[528], known[528] = "Cure Disease", "Cure Disease"
+        event("SPELLS_CHANGED")
+        assert(targetButton.attrs.spell1 == "Cure Disease", "Disease must select Cure Disease instead of Dispel Magic")
+    end
+end
+print("PASS: priest, paladin and shaman high-rank resurrection and matching cures; priest Magic/Disease separation")
+
+for _, id in ipairs({1238214, 1238215, 402174, 1240720, 1240721, 1316995, 1240826, 1240827, 1239242, 1239243, 1311590, 1311595}) do
+    spellNames[id], known[id] = "Forever healing spell " .. id, "Forever healing spell " .. id
+end
+event("SPELLS_CHANGED")
+local classified = {}
+for _, choice in ipairs(ns.GetSpellChoices()) do classified[choice.label] = choice.category end
+for _, id in ipairs({1238214, 1238215, 402174, 1240720, 1240721, 1316995, 1240826, 1240827, 1239242, 1239243, 1311590, 1311595}) do
+    assert(classified[spellNames[id]] == "heals", "Forever healing ID must be categorized without an older same-name lookup: " .. id)
+end
+print("PASS: distinct Forever healing spell/rank IDs retain Healing classification without legacy ID resolution")
+
+-- Every watched buff family must offer a real rank upgrade and suppress
+-- equal/stronger single-target and equivalent group versions.
+deadUnits.target = false
+harmful.target = {}
+AggeHealBotDB.smartBuffs = true
+AggeHealBotDB.bindings = {}
+for _, case in ipairs({
+    {class = "DRUID", base = 1126, healID = 8936, heal = "Regrowth"},
+    {class = "DRUID", base = 467, healID = 8936, heal = "Regrowth"},
+    {class = "PRIEST", base = 1243, healID = 2061, heal = "Flash Heal"},
+    {class = "PRIEST", base = 14752, healID = 2061, heal = "Flash Heal"},
+    {class = "PRIEST", base = 976, healID = 2061, heal = "Flash Heal"},
+}) do
+    local definition = ns.buffRanks[case.base]
+    local buffName = spellNames[case.base] or ("Ranked buff " .. case.base)
+    local groupName = "Group buff " .. case.base
+    -- Isolate this family from other known buffs and test fixtures.
+    for base, family in pairs(ns.buffRanks) do
+        for _, id in ipairs(family.ranks) do known[id] = nil end
+        for id in pairs(family.equivalents or {}) do known[id] = nil end
+    end
+    for _, id in ipairs(definition.ranks) do spellNames[id] = buffName end
+    for id in pairs(definition.equivalents or {}) do spellNames[id] = groupName end
+    UnitClass = function() return case.class, case.class end
+    local highestID = definition.ranks[#definition.ranks]
+    known[highestID] = buffName
+    C_SpellBook.GetSpellBookItemInfo = function(slot)
+        if slot == 1 then return {spellID = case.healID} end
+        if slot == 2 then return {spellID = highestID} end
+    end
+    auras.target = {{name = "Buff display name", spellId = definition.ranks[1]}}
+    event("PLAYER_LOGIN")
+    assert(targetButton.attrs.spell1 == buffName, "weaker buff must offer highest learned rank: " .. case.base)
+    assert(targetButton.regions[2].shown and targetButton.regions[3].shown, "upgrade must display the icon and glow")
+    auras.target = {{name = "Buff display name", spellId = highestID}}
+    event("UNIT_AURA", "target")
+    assert(targetButton.attrs.spell1 == case.heal, "equal rank must retain healing: " .. case.base)
+    for id, rank in pairs(definition.equivalents or {}) do
+        auras.target = {{name = "Group display name", spellId = id}}
+        event("UNIT_AURA", "target")
+        assert(targetButton.attrs.spell1 == (rank < #definition.ranks and buffName or case.heal), "group equivalent must compare strength: " .. id)
+    end
+    known[highestID] = nil
+    known[definition.ranks[1]] = buffName
+    highestID = definition.ranks[1]
+    event("SPELLS_CHANGED")
+    auras.target = {{name = "Buff display name", spellId = definition.ranks[#definition.ranks]}}
+    event("UNIT_AURA", "target")
+    assert(targetButton.attrs.spell1 == case.heal, "stronger buff must retain healing: " .. case.base)
+    auras.target = {{name = buffName, spellId = 987654}}
+    event("UNIT_AURA", "target")
+    assert(targetButton.attrs.spell1 == case.heal, "unknown matching rank must not be assumed weaker: " .. case.base)
+end
+print("PASS: all five buff families offer weaker-rank upgrades with icon/glow, suppress equal/higher ranks and compare group equivalents")
