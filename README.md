@@ -72,7 +72,7 @@ If the game rejects an offered buff because a stronger conflicting effect is act
 
 Target-frame click healing and buff watching are **on by default** and can be switched off in `/ahb`.
 
-**Right-click menu** is off by default. Turn it on in `/ahb` to use plain right-click for the unit menu on your player and target frames. Party and raid frames use their assigned right-click bindings.
+**Override rightclick** is on by default. Your player and target frames use their assigned plain right-click bindings. Turn it off in `/ahb` to open the native unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged. Existing saved preferences are preserved.
 
 Outside combat, plain left-click prioritizes a learned reagent-free resurrection on a dead friendly player, then a learned cure for a removable debuff, then missing buffs, then your assigned heal. Resurrection has a pale-blue glow, and cure watching has a red glow. Cure watching can be disabled in `/ahb`.
 

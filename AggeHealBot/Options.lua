@@ -88,7 +88,7 @@ local function Update()
     panel.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
-    panel.rightClickMenu:SetChecked(AggeHealBotDB.rightClickMenu)
+    panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     if panel.blessings then
         if A.GetPlayerClass() == "PALADIN" then panel.blessings:Show() else panel.blessings:Hide() end
@@ -414,7 +414,7 @@ function A.ShowOptions(host)
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, resetY - 32)
         divider:SetPoint("TOPLEFT", 349, -43)
-        local function Check(key, label, x, y, description)
+        local function Check(key, label, x, y, description, inverted)
             local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
             check:SetPoint("TOPLEFT", x, y)
             -- Include the label in the hover/click area without stretching the
@@ -423,7 +423,12 @@ function A.ShowOptions(host)
             local text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             text:SetPoint("LEFT", check, "RIGHT", 2, 0)
             text:SetText(label)
-            check:SetScript("OnClick", function(self) A.SetOption(key, self:GetChecked()); Update() end)
+            check:SetScript("OnClick", function(self)
+                local value = self:GetChecked()
+                if inverted then value = not value end
+                A.SetOption(key, value)
+                Update()
+            end)
             check:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(label, 1, 0.82, 0)
@@ -447,8 +452,8 @@ function A.ShowOptions(host)
             "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
         panel.target = Check("targetFrame", "Target frame", 182, -93,
             "Enable click healing and watch indicators on the stock friendly target frame. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
-        panel.rightClickMenu = Check("rightClickMenu", "Right-click menu", 18, -121,
-            "Use plain right-click to open the unit menu on your player and target frames. Party and raid frames use their assigned bindings. Turn this off to also use your assigned right-click binding on player and target frames.")
+        panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -121,
+            "Use your assigned plain right-click binding instead of the native unit menu on player and target frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true)
         panel.raidControls = Check("hideRaidControls", "Hide raid controls", 182, -121,
             "Hide Blizzard's raid-control side panel and its tab. Your party and raid unit frames stay visible.")
         panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,

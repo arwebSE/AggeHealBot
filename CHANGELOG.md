@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.7 — 2026-11-12
+
+- Rename Right-click menu to Override rightclick and invert its checkbox: checked uses the assigned binding, unchecked opens the native player/target unit menu. Preserve existing saved behavior and defaults.
+
 ## 1.0.6 — 2026-11-11
 
 - Add smooth mouse texture scaling, a wheel-sized red highlight and a compact editor layout with clean spell icons around the mouse.

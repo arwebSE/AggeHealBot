@@ -923,7 +923,7 @@ targetButton.scripts.OnLeave(targetButton)
 print("PASS: original target tooltip uses the native default position while addon bindings remain next to the target frame")
 
 assert(ns.SaveBinding("", 2, "spell", "Rejuvenation"))
-AggeHealBotSettings.rightClickMenu:SetChecked(true)
+AggeHealBotSettings.rightClickMenu:SetChecked(false)
 AggeHealBotSettings.rightClickMenu.scripts.OnClick(AggeHealBotSettings.rightClickMenu)
 local savedMenuAPI = Menu
 Menu = nil
@@ -1171,7 +1171,7 @@ assert(AggeHealBotDB.smartBuffs and AggeHealBotDB.cureWatch and AggeHealBotDB.ta
 assert(AggeHealBotDB.playerFrame and AggeHealBotDB.combatCures and AggeHealBotDB.hideRaidControls
     and not AggeHealBotDB.combatResurrection and not AggeHealBotDB.rightClickMenu, "reset button must restore all toggle defaults")
 assert(AggeHealBotDB.bindings["2"] == savedRightBinding and targetButton.attrs.spell2 == "Rejuvenation", "reset settings must preserve saved spell bindings")
-assert(AggeHealBotSettings.buffs:GetChecked() and not AggeHealBotSettings.rightClickMenu:GetChecked(), "reset must refresh checkbox states")
+assert(AggeHealBotSettings.buffs:GetChecked() and AggeHealBotSettings.rightClickMenu:GetChecked(), "reset must refresh checkbox states, including the inverted right-click override")
 ns.SetOption("targetFrame", false)
 combat = true
 ns.ResetOptions()
