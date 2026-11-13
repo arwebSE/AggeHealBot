@@ -9,6 +9,7 @@ end
 local ranges, tickers = {}, {}
 local cvars = {autoSelfCast = "1", ActionButtonUseKeyDown = "1"}
 local now, guids = 100, {}
+local menuBoundary
 function GetTime() return now end
 function UnitGUID(unit) return guids[unit] or ("GUID-" .. unit) end
 SPELL_FAILED_AURA_BOUNCED = "A more powerful spell is already active"
@@ -85,6 +86,8 @@ function CreateFrame(_, name, parent, template)
     function f:SetFrameLevel(level) self.frameLevel = level end
     function f:SetAllPoints(relative) self.allPoints = relative end
     function f:EnableMouse() end
+    function f:SetSize(width, height) self.width, self.height = width, height end
+    function f:SetPoint(...) self.point = {...} end
     function f:SetHitRectInsets() end
     function f:GetAttribute(k) return self.attrs[k] end
     function f:SetAttribute(k, v) assert(not combat, "protected write in combat"); self.attrs[k] = v end
@@ -115,6 +118,29 @@ local function event(e, ...)
     local target = coreEvents or events
     target.scripts.OnEvent(target, e, ...)
 end
+-- Model the secure template's action between addon PreClick/PostClick hooks.
+-- This verifies routing; the client is still needed to validate actual taint.
+local function clickDelegate(delegate, button, prefix)
+    if delegate.scripts.PreClick then delegate.scripts.PreClick(delegate, button) end
+    if delegate.template == "SecureActionButtonTemplate" then
+        assert(delegate.scripts.OnClick == nil, "addon code must not replace the native secure OnClick")
+        prefix = prefix or ""
+        local suffix = button == "LeftButton" and "1" or button == "RightButton" and "2"
+            or button == "MiddleButton" and "3" or button:match("^Button(%d+)$")
+        local action = delegate.attrs[prefix .. "type" .. suffix] or delegate.attrs["*type" .. suffix]
+            or delegate.attrs[prefix .. "type*"] or delegate.attrs["*type*"] or delegate.attrs.type
+        assert(action == "togglemenu", "delegate must resolve a menu action for the forwarded button and modifier")
+        assert(delegate.attrs.useOnKeyDown == false and delegate.clicks[1] == "AnyUp",
+            "delegated Click(button) must execute regardless of the global key-down preference")
+        local previous = menuBoundary
+        menuBoundary = "secure-action"
+        UnitPopup_OpenMenu(nil, {ownerFrame = delegate, unit = delegate.attrs.unit}, button)
+        menuBoundary = previous
+    else
+        delegate.scripts.OnClick(delegate, button)
+    end
+    if delegate.scripts.PostClick then delegate.scripts.PostClick(delegate, button) end
+end
 local function mouseEdge(frame, button, down, prefix)
     local wanted = down and "AnyDown" or "AnyUp"
     local registered = false
@@ -124,7 +150,7 @@ local function mouseEdge(frame, button, down, prefix)
     prefix = prefix or ""
     if suffix and frame.attrs[prefix .. "type" .. suffix] == "click" then
         local delegate = frame.attrs[prefix .. "clickbutton" .. suffix]
-        delegate.scripts.OnClick(delegate, button)
+        clickDelegate(delegate, button, prefix)
     end
 end
 assert(loadfile("AggeHealBot/Defaults.lua"))("AggeHealBot", ns)
@@ -162,9 +188,14 @@ local manager = {
     CloseMenus = function() currentMenu = nil end,
 }
 Menu = {GetManager = function() return manager end}
-function CompactUnitFrame_OpenMenu(_, unit, mouseButton)
-    menuUnit, menuMouse = unit, mouseButton
-    currentMenu = {}
+function CompactUnitFrame_OpenMenu()
+    error("addon must not build native menus through a Lua fallback")
+end
+function UnitPopup_OpenMenu(_, context, mouseButton)
+    assert(menuBoundary == "secure-action", "only the native secure action may build the unit menu")
+    menuUnit, menuMouse = context.unit, mouseButton
+    local builtSecurely = menuBoundary == "secure-action"
+    currentMenu = {PickPVP = function() assert(builtSecurely, "protected PvP action must retain a securely-built menu") end}
 end
 local menu = PlayerFrame.attrs.clickbutton4
 mouseEdge(PlayerFrame, "Button4", true)
@@ -175,13 +206,14 @@ mouseEdge(PlayerFrame, "Button4", true)
 assert(not currentMenu, "same side button closes unit menu")
 mouseEdge(PlayerFrame, "Button4", false)
 assert(not currentMenu, "release does not reopen unit menu")
-menu.scripts.OnClick(menu, "Button4")
+clickDelegate(menu, "Button4")
 assert(currentMenu, "unit menu reopens")
 currentMenu = nil
-menu.scripts.OnClick(menu, "Button4")
+clickDelegate(menu, "Button4")
 assert(currentMenu, "unit menu reopens after external dismissal")
 PlayerFrame:SetAttribute("unit", "party1")
-menu.scripts.OnClick(menu, "Button4")
+PlayerFrame.scripts.PreClick(PlayerFrame, "Button4")
+clickDelegate(menu, "Button4")
 assert(menuUnit == "party1", "menu follows reassigned stock-frame unit")
 assert(currentMenu, "different unit replaces menu instead of closing it")
 PlayerFrame:SetAttribute("unit", "player")
@@ -810,10 +842,8 @@ TargetFrame = CreateFrame("Button", "TargetFrame")
 TargetFrame:SetAttribute("unit", "target")
 TargetFrame:SetAttribute("type1", "target")
 TargetFrame:SetAttribute("type2", "togglemenu")
-local targetMenus = 0
 TargetFrame:SetAttribute("menu-function", function(frame, unit)
-    assert(frame == TargetFrame and unit == "target")
-    targetMenus = targetMenus + 1
+    error("addon must not invoke the native target menu callback from Lua")
 end)
 auras.target, guids.target = {}, "friendly-A"
 event("GROUP_ROSTER_UPDATE")
@@ -824,7 +854,18 @@ assert(targetButton.attrs.spell1 == "Mark" and targetButton.regions[2].shown, "f
 assert(TargetFrame.attrs.type1 == "target" and TargetFrame.attrs.type2 == "togglemenu", "native target bindings must remain untouched")
 assert(targetButton.attrs["shift-clickbutton3"] == ns.settingsButton, "target gets the rebindable Shift-middle menu default")
 mouseEdge(targetButton, "Button4", true)
-assert(targetMenus == 1, "target menu binding must use the original target frame's menu")
+assert(menuUnit == "target" and currentMenu, "target menu binding must use the secure native action for target")
+currentMenu.PickPVP()
+assert(targetButton:GetAttribute("menu-function") == nil, "target overlay must not install an addon menu wrapper")
+combat = true
+mouseEdge(targetButton, "RightButton", true, "shift-")
+mouseEdge(targetButton, "RightButton", false, "shift-")
+assert(not currentMenu, "combat modifier menu must toggle closed without protected writes")
+mouseEdge(targetButton, "RightButton", true, "shift-")
+assert(currentMenu and menuUnit == "target", "combat modifier menu must reopen through the secure action")
+currentMenu.PickPVP()
+combat = false
+manager:CloseMenus()
 auras.target = {{name = "Mark"}}
 event("UNIT_AURA", "target")
 assert(targetButton.attrs.spell1 == "Thorns", "target watcher advances through missing buffs")
@@ -932,18 +973,22 @@ for _, frame in ipairs({PlayerFrame, normalParty, CompactRaidFrame1, targetButto
     assert(frame.attrs.type2 == "click" and frame.attrs.spell2 == nil and frame.attrs.macrotext2 == nil,
         "right-click override must replace the spell action on player/target frames")
     assert(not drivers[frame].type2, "menu override must remove a prior spell/range driver")
-    local originalMenu, opened = frame:GetAttribute("menu-function"), 0
-    frame:SetAttribute("menu-function", function() opened = opened + 1 end)
+    local owner = frame == targetButton and TargetFrame or frame
+    local originalMenu = owner:GetAttribute("menu-function")
+    owner:SetAttribute("menu-function", function(menuFrame)
+        error("menu binding must not invoke addon Lua to build a native menu")
+    end)
     mouseEdge(frame, "RightButton", true)
     mouseEdge(frame, "RightButton", false)
-    assert(opened == 1, "right-click menu must execute once per press")
-    frame:SetAttribute("menu-function", originalMenu)
+    assert(menuUnit == (frame == targetButton and "target" or "player"), "right-click menu uses the delegate's explicit unit")
+    owner:SetAttribute("menu-function", originalMenu)
     else
         assert(frame.attrs.type2 == "macro" and frame.attrs.spell2 == "Rejuvenation" and frame.attrs.clickbutton2 == nil,
             "party and raid frames must retain their assigned right-click spell even with the menu override enabled")
     end
 end
 Menu = savedMenuAPI
+manager:CloseMenus()
 assert(PlayerFrame.attrs["ctrl-spell2"] == "Abolish Poison", "right-click override must preserve modifier spell bindings")
 normalParty.scripts.OnEnter(normalParty)
 local advertisesMenu = false
@@ -1453,12 +1498,24 @@ print("PASS: paladin class suggestions, Wisdom for druids without form inspectio
 ns.ResetBindings()
 for _, frame in ipairs({PlayerFrame, targetButton, normalParty, CompactRaidFrame1}) do
     assert(frame.attrs["shift-type1"] == "macro" and frame.attrs["shift-clickbutton1"] == nil)
-    local expectedUnit = frame == PlayerFrame and "player" or frame == targetButton and "target" or "mouseover"
+    local expectedUnit = frame == PlayerFrame and "player" or frame == targetButton and "target" or frame:GetAttribute("unit") or frame.unit
     assert(frame.attrs["shift-macrotext1"] == "/target [@" .. expectedUnit .. ",exists]", "target binding must bypass the native interaction filter without a fallback")
     assert(frame.attrs["shift-type3"] == "click" and frame.attrs["shift-clickbutton3"] == ns.settingsButton)
     assert(frame.attrs["shift-type2"] == "click" and frame.attrs["shift-clickbutton2"] == frame.attrs.clickbutton4,
         "Shift-right must use the same unit context-menu delegate as Button 4")
 end
+local oldPartyRange = ranges.party1
+ranges.party1 = false
+normalParty.scripts.PreClick(normalParty, "LeftButton")
+assert(normalParty.attrs["shift-type1"] == "macro"
+    and normalParty.attrs["shift-macrotext1"] == "/target [@party1,exists]",
+    "out-of-range party targeting must use the frame unit, without relying on mouseover or the healing range driver")
+normalParty:SetAttribute("unit", "party2")
+normalParty.scripts.PreClick(normalParty, "LeftButton")
+assert(normalParty.attrs["shift-macrotext1"] == "/target [@party2,exists]", "target binding must follow a reassigned party frame")
+normalParty:SetAttribute("unit", "party1")
+ranges.party1 = oldPartyRange
+normalParty.scripts.PreClick(normalParty, "LeftButton")
 assert(ns.SaveBinding("shift-", 1, "none"))
 assert(ns.SaveBinding("shift-", 2, "spell", "Flash of Light"))
 assert(ns.SaveBinding("shift-", 3, "none"))

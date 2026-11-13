@@ -351,36 +351,52 @@ local function TargetMacro(frame)
     -- Native UnitFrame click-binding routing can discard type="target" when
     -- no Blizzard interaction binding exists for this modifier/button. An
     -- explicit secure macro keeps targeting within our own saved bindings.
-    local unit = frame == PlayerFrame and "player" or frame == A.targetButton and "target" or "mouseover"
+    -- A distant group member may not resolve as mouseover. Use the frame's
+    -- actual unit token so selecting someone never depends on spell range.
+    local unit = frame == PlayerFrame and "player" or frame == A.targetButton and "target" or Unit(frame)
+    if not unit then return end
     return "/target [@" .. unit .. ",exists]"
 end
 local function MenuButton(frame)
     local state = frames[frame]
     if not state.menuButton then
-        -- UnitFrame's native OnClick filters interaction bindings through
-        -- C_ClickBindings, which can discard side-button menu actions. A normal
-        -- click delegate opens the stock menu without changing global bindings.
-        local button = CreateFrame("Button", nil, UIParent)
-        button:SetScript("OnClick", function(_, mouseButton)
+        -- Delegate to the secure action handler, not an addon Lua opener. Even
+        -- ExecuteAttribute/securecallfunction from our OnClick can taint menu
+        -- descriptions and block protected choices such as SetPVP later.
+        -- SecureActionButtonTemplate also avoids UnitFrame's interaction filter.
+        local button = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+        button:SetSize(1, 1)
+        button:SetPoint("CENTER")
+        button:EnableMouse(false)
+        button:RegisterForClicks("AnyUp")
+        -- Secure click delegation sends Click(button) without a down edge,
+        -- even though the originating frame responds on mouse press.
+        button:SetAttribute("useOnKeyDown", false)
+        button:SetAttribute("*type*", "togglemenu")
+        button:SetAttribute("checkselfcast", false)
+        button:SetAttribute("checkfocuscast", false)
+        local closeOnPress
+        button:SetScript("PreClick", function()
             if addonTooltip then addonTooltip:Hide() end
-            if not frames[frame] then return end
-            local unit = Unit(frame)
-            if not unit then return end
             local manager = Menu and Menu.GetManager and Menu.GetManager()
-            if manager and openUnitMenu and manager:GetOpenMenu() == openUnitMenu and openUnitMenuUnit == unit then
+            closeOnPress = manager and openUnitMenu and manager:GetOpenMenu() == openUnitMenu
+                and openUnitMenuUnit == Unit(frame)
+        end)
+        button:SetScript("PostClick", function()
+            local manager = Menu and Menu.GetManager and Menu.GetManager()
+            if not manager then return end
+            if closeOnPress then
                 manager:CloseMenus()
                 openUnitMenu, openUnitMenuUnit = nil, nil
-                return
+            else
+                openUnitMenu = manager:GetOpenMenu()
+                openUnitMenuUnit = openUnitMenu and Unit(frame) or nil
             end
-            local menu = frame:GetAttribute("menu-function")
-            if type(menu) == "function" then menu(frame, unit, mouseButton)
-            elseif CompactUnitFrame_OpenMenu then CompactUnitFrame_OpenMenu(frame, unit, mouseButton) end
-            openUnitMenu = manager and manager:GetOpenMenu() or nil
-            openUnitMenuUnit = openUnitMenu and unit or nil
         end)
-        button:Hide()
         state.menuButton = button
     end
+    -- Apply runs outside combat, including after stock frames change units.
+    state.menuButton:SetAttribute("unit", Unit(frame))
     return state.menuButton
 end
 local function BindingAction(frame, binding)
@@ -714,11 +730,6 @@ local function RegisterTargetFrame()
         button:EnableMouse(true)
         button.unit = "target"
         button:SetAttribute("unit", "target")
-        button:SetAttribute("menu-function", function(_, unit, mouseButton)
-            local menu = TargetFrame:GetAttribute("menu-function")
-            if type(menu) == "function" then menu(TargetFrame, unit, mouseButton)
-            elseif CompactUnitFrame_OpenMenu then CompactUnitFrame_OpenMenu(TargetFrame, unit, mouseButton) end
-        end)
         button:HookScript("OnHide", function(self)
             A.UpdateBuffIndicator(self)
             if hoveredFrame == self then

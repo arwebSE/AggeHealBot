@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8 — 2026-11-13
+
+- Correct the secure menu delegate's button/modifier wildcard so every Unit menu binding executes its native action.
+- Target party and raid members using their frame's unit token instead of mouseover so targeting is independent of healing range.
+- Open unit menus through Blizzard's secure menu action instead of addon Lua callbacks or ExecuteAttribute wrappers, preventing taint from reaching protected menu options such as PvP and interaction-distance checks. Keep side-button toggling and tooltip suppression.
+
 ## 1.0.7 — 2026-11-12
 
 - Rename Right-click menu to Override rightclick and invert its checkbox: checked uses the assigned binding, unchecked opens the native player/target unit menu. Preserve existing saved behavior and defaults.
