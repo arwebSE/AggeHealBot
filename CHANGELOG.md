@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9 — 2026-11-14
+
+- Explain unavailable spells with Mounted, Dead, Ghost or In a vehicle when the player's state is safely readable. Keep the generic fallback for unknown causes and retain range, resource and cooldown hints.
+
 ## 1.0.8 — 2026-11-13
 
 - Correct the secure menu delegate's button/modifier wildcard so every Unit menu binding executes its native action.

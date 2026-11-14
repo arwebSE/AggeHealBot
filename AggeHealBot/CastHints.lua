@@ -1,6 +1,18 @@
 local _, A = ...
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function number(v) return not secret(v) and type(v) == "number" end
+local function flag(api, ...)
+    if not api then return false end
+    local ok, value = pcall(api, ...)
+    return ok and not secret(value) and value == true
+end
+local function UnavailableReason()
+    if flag(UnitIsGhost, "player") then return "Ghost" end
+    if flag(UnitIsDeadOrGhost, "player") then return "Dead" end
+    if flag(IsMounted) then return "Mounted" end
+    if flag(UnitInVehicle, "player") then return "In a vehicle" end
+    return "Spell unavailable"
+end
 
 -- Hints only. The game validates resource/cooldown failures; these never
 -- replace protected combat bindings or make decisions from secret values.
@@ -37,7 +49,7 @@ function A.CastProblem(spell, unit)
             end
         end
     end
-    if unavailable then return "Spell unavailable" end
+    if unavailable then return UnavailableReason() end
 end
 
 function A.NeedsHealing(unit)

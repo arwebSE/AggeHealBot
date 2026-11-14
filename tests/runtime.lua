@@ -1367,12 +1367,32 @@ lowPower = true
 assert(ns.CastProblem("Regrowth", "target") == "Not enough mana / power")
 lowPower, usable = false, false
 assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable")
+local mounted = true
+IsMounted = function() return mounted end
+assert(ns.CastProblem("Regrowth", "target") == "Mounted")
+usable = true
+assert(ns.CastProblem("Regrowth", "target") == nil, "being mounted must not mark an otherwise usable spell unavailable")
+usable, mounted = false, false
+assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable", "dismount must clear the mounted reason")
+IsMounted = function() error("state unavailable") end
+assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable", "failed state APIs must retain the generic fallback")
+IsMounted = nil
+UnitIsGhost = function(unit) assert(unit == "player"); return true end
+assert(ns.CastProblem("Regrowth", "target") == "Ghost")
+UnitIsGhost = nil
+UnitInVehicle = function(unit) assert(unit == "player"); return true end
+assert(ns.CastProblem("Regrowth", "target") == "In a vehicle")
+UnitInVehicle = nil
 usable, cooldownInfo = true, {startTime = now - 2, duration = 10}
 assert(ns.CastProblem("Regrowth", "target") == "On cooldown (8s)")
 C_Spell.GetSpellCooldown = function() return {startTime = now - 1, duration = 2} end
 assert(ns.CastProblem("Regrowth", "target") == nil, "the global cooldown must not dim every spell")
 local hiddenValue = setmetatable({}, {__add = function() error("secret arithmetic") end, __mul = function() error("secret arithmetic") end})
 issecretvalue = function(value) return value == hiddenValue end
+IsMounted = function() return hiddenValue end
+C_Spell.IsSpellUsable = function() return false, false end
+assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable", "secret states must not be used as unavailable reasons")
+IsMounted = nil
 C_Spell.IsSpellUsable = function() return hiddenValue, hiddenValue end
 C_Spell.GetSpellCooldown = function() return {startTime = hiddenValue, duration = hiddenValue} end
 assert(ns.CastProblem("Regrowth", "target") == nil)
@@ -1426,6 +1446,14 @@ assert(not targetButton.regions[3].shown, "unavailable buff stops the urgent glo
 lowPower = false
 event("SPELL_UPDATE_USABLE")
 assert(targetButton.regions[3].shown, "availability recovery restores the glow")
+usable, mounted = false, true
+IsMounted = function() return mounted end
+event("SPELL_UPDATE_USABLE")
+assert(HasTip("Mounted") and not HasTip("Spell unavailable"), "frame tooltip must explain the mounted state")
+assert(targetButton.attrs.macrotext1 == beforeMacro, "state hints must not change protected casts")
+usable, mounted, IsMounted = true, false, nil
+event("SPELL_UPDATE_USABLE")
+assert(not HasTip("Mounted"), "tooltip must clear the reason when casting becomes available")
 assert(cvars.autoSelfCast == "1" and targetButton.attrs.checkselfcast == false and PlayerFrame.attrs.checkselfcast == false)
 assert(not targetButton.attrs.macrotext1:find("@player", 1, true), "explicit frame macros must not contain a self fallback")
 print("PASS: public-only range/mana/cooldown hints, global cooldown exclusion, injured-player healing priority, and unchanged global Auto Self Cast")
