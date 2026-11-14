@@ -2,6 +2,7 @@ local _, A = ...
 local panel, picker, selected, selectedButton = nil, nil, 1, 1
 local optionsCanvas, optionsCategory
 local toolsPane
+local buffPane
 local categoryLabels = {heals = "Heal", buffs = "Buff", utility = "Utility", other = "Other", actions = "Action"}
 local categoryColors = {heals = {0.5, 1, 0.7}, buffs = {0.5, 0.75, 1}, utility = {0.8, 0.6, 1}, other = {0.6, 0.62, 0.66}, actions = {0.85, 0.75, 0.5}}
 local selectionGold = {1, 0.76, 0.2}
@@ -61,6 +62,96 @@ local function Button(parent, value, width, x, y, fn)
     b:SetScript("OnClick", fn)
     return b
 end
+local function PriorityArrow(parent, direction, x, y, onClick)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(28, 28)
+    button:SetPoint("TOPLEFT", x, y)
+    local background = button:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.07, 0.065, 0.055, 0.85)
+    for _, edge in ipairs({"TOP", "BOTTOM", "LEFT", "RIGHT"}) do
+        local border = button:CreateTexture(nil, "BORDER")
+        border:SetColorTexture(0.45, 0.37, 0.23, 0.65)
+        if edge == "TOP" or edge == "BOTTOM" then
+            border:SetPoint(edge .. "LEFT", 0, 0)
+            border:SetPoint(edge .. "RIGHT", 0, 0)
+            border:SetHeight(1)
+        else
+            border:SetPoint("TOP" .. edge, 0, 0)
+            border:SetPoint("BOTTOM" .. edge, 0, 0)
+            border:SetWidth(1)
+        end
+    end
+    button.strokes = {}
+    for _, side in ipairs({-1, 1}) do
+        local line = button:CreateLine(nil, "ARTWORK")
+        line:SetThickness(2)
+        line:SetStartPoint("CENTER", button, side * 5, -direction * 2)
+        line:SetEndPoint("CENTER", button, 0, direction * 3)
+        button.strokes[#button.strokes + 1] = line
+    end
+    function button:SetAvailable(value)
+        self.available = value
+        self:SetEnabled(value)
+        for _, line in ipairs(self.strokes) do
+            if value then line:SetColorTexture(1, 0.82, 0.35, 1)
+            else line:SetColorTexture(0.35, 0.35, 0.35, 0.65) end
+        end
+    end
+    button:SetScript("OnEnter", function(self)
+        if self.available then background:SetColorTexture(0.25, 0.2, 0.1, 0.95) end
+    end)
+    button:SetScript("OnLeave", function() background:SetColorTexture(0.07, 0.065, 0.055, 0.85) end)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+local function PageTab(parent, label, x, onClick)
+    -- The talent window uses this shared tab art, rotated for a top edge.
+    local tab = CreateFrame("Button", nil, parent, "TabSystemButtonArtTemplate")
+    tab:SetSize(150, 26)
+    tab:SetPoint("TOPLEFT", x, -32)
+    tab.isTabOnTop = true
+    tab:SetTabHeight(26)
+    tab:HandleRotation()
+    -- The inherited Button changes font objects on hover/disable. Pin every
+    -- button state as well as the text region so that size never flips.
+    function tab:Select(value)
+        self.selected = value
+        self:SetNormalFontObject(GameFontHighlight)
+        self:SetHighlightFontObject(GameFontHighlight)
+        self:SetDisabledFontObject(GameFontHighlight)
+        for _, side in ipairs({"Left", "Middle", "Right"}) do
+            self[side]:SetShown(not value)
+            self[side .. "Active"]:SetShown(value)
+            self[side .. "Highlight"]:Hide()
+        end
+        local suffix = self.locked and " |A:Talents-lock-c60:14:10|a"
+            or value and " |A:Talents-Checkmark-c60:15:20|a" or ""
+        self.Text:SetText(label .. suffix)
+        self.Text:SetFontObject(GameFontHighlight)
+        if self.locked then self.Text:SetTextColor(0.5, 0.5, 0.5)
+        elseif value then self.Text:SetTextColor(1, 1, 1)
+        else self.Text:SetTextColor(0.9, 0.8, 0.6) end
+        self.Text:ClearAllPoints()
+        self.Text:SetPoint("CENTER", self, "CENTER", 0, -4)
+    end
+    function tab:SetLocked(value)
+        self.locked = value
+        self:SetEnabled(not value)
+        self:Select(self.selected)
+    end
+    local function Highlight(self, visible)
+        for _, side in ipairs({"Left", "Middle", "Right"}) do
+            self[side .. "Highlight"]:SetShown(visible and not self.locked and not self.selected)
+        end
+    end
+    tab:SetScript("OnEnter", function(self) Highlight(self, true) end)
+    tab:SetScript("OnLeave", function(self) Highlight(self, false) end)
+    tab:SetScript("OnClick", onClick)
+    Highlight(tab, false)
+    tab:Select(false)
+    return tab
+end
 local function Value(binding)
     if not binding then return "Disabled" end
     if binding.action == "spell" then
@@ -70,6 +161,19 @@ local function Value(binding)
         return name .. (not learned and " |cff888888(unlearned)|r" or "")
     end
     return A.actionLabels[binding.action] or binding.action
+end
+local function SelectPage(page)
+    if page == "paladin" and A.GetPlayerClass() ~= "PALADIN" then page = "home" end
+    panel.activePage = page
+    if panel.home then panel.home:SetShown(page == "home") end
+    if picker then picker:SetShown(page == "home") end
+    if buffPane then buffPane:SetShown(page == "buffs") end
+    if toolsPane then toolsPane:SetShown(page == "paladin") end
+    if panel.nav then
+        local paladin = A.GetPlayerClass() == "PALADIN"
+        panel.nav.paladin:SetLocked(not paladin)
+        for key, tab in pairs(panel.nav) do tab:Select(key == page) end
+    end
 end
 local function Current(prefix, button)
     local custom = AggeHealBotDB.bindings[prefix .. button]
@@ -90,9 +194,7 @@ local function Update()
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
-    if panel.blessings then
-        if A.GetPlayerClass() == "PALADIN" then panel.blessings:Show() else panel.blessings:Hide() end
-    end
+    SelectPage(panel.activePage or "home")
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
         local binding = Current(A.modifiers[selected].prefix, i)
@@ -109,13 +211,16 @@ local function Update()
         picker:Render()
     end
     if toolsPane and toolsPane:IsShown() then toolsPane:Render() end
+    if buffPane and buffPane:IsShown() then buffPane:Render() end
 end
 local function OpenPicker(button)
+    SelectPage("home")
+    if buffPane then buffPane:Hide() end
     if toolsPane then toolsPane:Hide() end
     selectedButton = button
     if not picker then
         -- Inline browser, not a second window covering the bindings.
-        picker = CreateFrame("Frame", "AggeHealBotSpellPicker", panel)
+        picker = CreateFrame("Frame", "AggeHealBotSpellPicker", panel.home)
         picker:SetSize(390, 451)
         picker:SetPoint("TOPLEFT", 365, -43)
         picker.heading = Text(picker, "", 0, 0)
@@ -272,24 +377,24 @@ local function OpenPicker(button)
 end
 local function OpenBlessings()
     if A.GetPlayerClass() ~= "PALADIN" then return end
-    if toolsPane and toolsPane:IsShown() then OpenPicker(selectedButton); return end
+    SelectPage("paladin")
     if picker then picker:Hide() end
     if not toolsPane then
         toolsPane = CreateFrame("Frame", "AggeHealBotTools", panel)
-        toolsPane:SetSize(390, 451)
-        toolsPane:SetPoint("TOPLEFT", 365, -43)
+        toolsPane:SetSize(732, 451)
+        toolsPane:SetPoint("TOPLEFT", 24, -78)
         toolsPane.heading = Text(toolsPane, "", 0, 0)
         toolsPane.description = Text(toolsPane, "", 0, -33, "GameFontHighlightSmall")
-        toolsPane.description:SetWidth(384)
+        toolsPane.description:SetWidth(720)
         toolsPane.description:SetWordWrap(true)
         toolsPane.message = Text(toolsPane, "", 0, -380, "GameFontHighlightSmall")
-        toolsPane.message:SetWidth(384)
+        toolsPane.message:SetWidth(720)
         toolsPane.message:SetWordWrap(true)
         toolsPane.rows = {}
         for i = 1, 9 do
             local token = A.paladinClasses[i]
             local row = CreateFrame("Frame", nil, toolsPane)
-            row:SetSize(384, 29)
+            row:SetSize(732, 29)
             row:SetPoint("TOPLEFT", 0, -86 - (i - 1) * 32)
             row.class = token
             row.fill = row:CreateTexture(nil, "BACKGROUND")
@@ -304,14 +409,14 @@ local function OpenBlessings()
             row.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
             row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             row.label:SetPoint("LEFT", 42, 0)
-            row.label:SetWidth(112)
+            row.label:SetWidth(180)
             row.label:SetJustifyH("LEFT")
             row.label:SetWordWrap(false)
             local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
             if color then row.label:SetTextColor(color.r, color.g, color.b) end
             row.dropdown = CreateFrame("DropdownButton", nil, row, "WowStyle1DropdownTemplate")
-            row.dropdown:SetSize(194, 24)
-            row.dropdown:SetPoint("LEFT", 174, 0)
+            row.dropdown:SetSize(450, 24)
+            row.dropdown:SetPoint("LEFT", 252, 0)
             row.dropdown.Text:SetJustifyH("LEFT")
             row.dropdown:SetDefaultText("Auto")
             row.dropdown:EnableMouseWheel(false)
@@ -330,7 +435,6 @@ local function OpenBlessings()
             for _, token in ipairs(A.paladinClasses) do A.SetPaladinRule(token, "auto") end
             toolsPane:Render()
         end)
-        toolsPane.back = Button(toolsPane, "Back to bindings", 174, 210, -410, function() OpenPicker(selectedButton) end)
         toolsPane:SetScript("OnHide", function(self)
             for _, row in ipairs(self.rows) do row.dropdown:CloseMenu() end
         end)
@@ -350,6 +454,100 @@ local function OpenBlessings()
     toolsPane.message:SetText("Single-target blessings; equal or stronger greater blessings count.")
     toolsPane:Render()
     toolsPane:Show()
+end
+local function OpenBuffs()
+    SelectPage("buffs")
+    if picker then picker:Hide() end
+    if toolsPane then toolsPane:Hide() end
+    if not buffPane then
+        buffPane = CreateFrame("Frame", "AggeHealBotBuffSettings", panel)
+        buffPane:SetSize(732, 451)
+        buffPane:SetPoint("TOPLEFT", 24, -78)
+        Text(buffPane, "Buffs & cures", 0, 0)
+        local description = Text(buffPane, "Choose watched spells and their priority. This controls out-of-combat left click; combat cure alerts use your cure order.", 0, -30, "GameFontHighlightSmall")
+        description:SetWidth(720)
+        description:SetWordWrap(true)
+        Text(buffPane, "Watcher priority", 0, -67, "GameFontHighlightSmall")
+        buffPane.order = CreateFrame("DropdownButton", nil, buffPane, "WowStyle1DropdownTemplate")
+        buffPane.order:SetSize(250, 24)
+        buffPane.order:SetPoint("TOPLEFT", 128, -60)
+        buffPane.order:SetDefaultText("Cures first (default)")
+        buffPane.order:SetupMenu(function(_, root)
+            for _, choice in ipairs({{"cures", "Cures first (default)"}, {"buffs", "Buffs first"}}) do
+                root:CreateRadio(choice[2], function(value)
+                    return AggeHealBotDB.buffsBeforeCures == (value == "buffs")
+                end, function(value) A.SetOption("buffsBeforeCures", value == "buffs"); buffPane:Render() end, choice[1])
+            end
+        end)
+        buffPane.buffHeading = Text(buffPane, "Buffs", 0, -108)
+        buffPane.cureHeading = Text(buffPane, "Cures", 380, -108)
+        buffPane.buffHeading:SetTextColor(0.5, 0.75, 1)
+        buffPane.cureHeading:SetTextColor(1, 0.5, 0.4)
+        buffPane.rows, buffPane.cureRows = {}, {}
+        buffPane.empty = Text(buffPane, "", 0, -148, "GameFontHighlightSmall")
+        buffPane.empty:SetWidth(345)
+        buffPane.empty:SetWordWrap(true)
+        buffPane.message = Text(buffPane, "", 0, -360, "GameFontHighlightSmall")
+        buffPane.message:SetWidth(720)
+        buffPane.message:SetWordWrap(true)
+        buffPane.defaults = Button(buffPane, "Restore watcher defaults", 210, 0, -410, function() A.ResetWatchers(); buffPane:Render() end)
+        buffPane:SetScript("OnHide", function(self) self.order:CloseMenu() end)
+        local function RenderList(kind, rows, x, list)
+            for index, entry in ipairs(list) do
+                local row = rows[index]
+                if not row then
+                    row = CreateFrame("Frame", nil, buffPane)
+                    row:SetSize(352, 44)
+                    row:SetPoint("TOPLEFT", x, -138 - (index - 1) * 48)
+                    local fill = row:CreateTexture(nil, "BACKGROUND")
+                    fill:SetAllPoints()
+                    fill:SetAtlas("UI-Character-Info-Line-Bounce")
+                    fill:SetVertexColor(0.3, 0.3, 0.34, 0.35)
+                    row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+                    row.check:SetSize(26, 26)
+                    row.check:SetPoint("LEFT", 0, 0)
+                    row.check:SetScript("OnClick", function(button) A.SetBuffWatchEnabled(row.id, button:GetChecked(), kind); buffPane:Render() end)
+                    row.icon = row:CreateTexture(nil, "ARTWORK")
+                    row.icon:SetSize(26, 26)
+                    row.icon:SetPoint("LEFT", 32, 0)
+                    row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    row.name = Text(row, "", 66, -5, "GameFontHighlightSmall")
+                    row.name:SetWidth(218)
+                    row.note = Text(row, "", 66, -23, "GameFontHighlightSmall")
+                    row.note:SetWidth(218)
+                    row.up = PriorityArrow(row, 1, 292, -8, function() A.MoveBuffWatch(row.id, -1, kind); buffPane:Render() end)
+                    row.down = PriorityArrow(row, -1, 324, -8, function() A.MoveBuffWatch(row.id, 1, kind); buffPane:Render() end)
+                    rows[index] = row
+                end
+                row.id = entry.id
+                row.check:SetChecked(entry.enabled)
+                row.icon:SetTexture(entry.icon)
+                row.icon:SetAlpha(entry.enabled and entry.learned and 1 or 0.4)
+                row.name:SetText(entry.name)
+                local note = not entry.enabled and "Off" or entry.learned and ("Priority " .. index) or "Not learned yet"
+                if kind == "cures" and entry.enabled and entry.learned then
+                    note = (AggeHealBotDB.cureWatchRules and ("Priority " .. index) or "Default") .. " - " .. (entry.kinds or "")
+                end
+                row.note:SetText(note)
+                row.up:SetAvailable(index > 1)
+                row.down:SetAvailable(index < #list)
+                row:Show()
+            end
+            for index = #list + 1, #rows do rows[index]:Hide() end
+        end
+        function buffPane:Render()
+            local buffs, cures = A.GetBuffWatchList(), A.GetCureWatchList()
+            RenderList("buffs", self.rows, 0, buffs)
+            RenderList("cures", self.cureRows, 380, cures)
+            self.order:GenerateMenu()
+            self.buffHeading:SetText(AggeHealBotDB.smartBuffs and "Buffs" or "Buffs (off)")
+            self.cureHeading:SetText(AggeHealBotDB.cureWatch and "Cures" or "Cures (off)")
+            self.empty:SetText(#buffs > 0 and "" or A.GetPlayerClass() == "PALADIN" and "Choose the blessing for each class in the Paladin tab." or "This class has no automatic buff-watch list.")
+            self.message:SetText(InCombatLockdown() and "Saved. Changes apply after combat." or "Resurrection stays first. Cure defaults follow debuff order until customized. Unlearned spells activate when trained; choices save for this character.")
+        end
+    end
+    buffPane:Render()
+    buffPane:Show()
 end
 local function FitEditor(host)
     if not panel or panel.embeddedHost ~= host then return end
@@ -379,10 +577,23 @@ local function PlaceEditor(host)
     if host then FitEditor(host)
     else tinsert(UISpecialFrames, "AggeHealBotSettings") end
 end
+function A.CloseOptions()
+    if not panel then return end
+    -- The addon-owned frame can close during combat. HideUIPanel's stock
+    -- combat guard must not leave our editor stuck open via its inherited X.
+    panel:Hide()
+    if panel.embeddedHost and not InCombatLockdown() and HideUIPanel then
+        local root = SettingsPanel and SettingsPanel:IsShown() and SettingsPanel
+            or InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() and InterfaceOptionsFrame
+        if root then HideUIPanel(root) end
+    end
+end
 function A.ShowOptions(host)
     if not host and panel and panel.embeddedHost and panel.embeddedHost:IsVisible() then host = panel.embeddedHost end
     if not panel then
         panel = CreateFrame("Frame", "AggeHealBotSettings", UIParent, "PortraitFrameTemplate")
+        local close = panel.CloseButton or _G.AggeHealBotSettingsCloseButton
+        if close then close:SetScript("OnClick", A.CloseOptions) end
         -- Use the same frame art as Forever's character window, without a portrait.
         if panel.PortraitContainer then panel.PortraitContainer:Hide() end
         if panel.NineSlice and NineSliceUtil then
@@ -393,8 +604,8 @@ function A.ShowOptions(host)
             panel.TitleContainer:SetPoint("TOPLEFT", 18, -1)
             panel.TitleContainer:SetPoint("TOPRIGHT", -24, -1)
         end
-        local resetY = A.GetPlayerClass() == "PALADIN" and 558 or 526
-        panel:SetSize(780, resetY + 66)
+        local resetY = 526
+        panel:SetSize(780, resetY + 98)
         panel:SetPoint("CENTER")
         panel:SetFrameStrata("DIALOG")
         panel:SetClampedToScreen(true)
@@ -410,12 +621,25 @@ function A.ShowOptions(host)
             panel.Bg:SetVertexColor(0.65, 0.65, 0.65)
         end
         tinsert(UISpecialFrames, "AggeHealBotSettings")
-        local divider = panel:CreateTexture(nil, "BACKGROUND")
+        panel.home = CreateFrame("Frame", nil, panel)
+        panel.home:SetSize(780, 592)
+        panel.home:SetPoint("TOPLEFT", 0, -32)
+        panel.nav = {}
+        for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}}) do
+            local key = entry[1]
+            local tab = PageTab(panel, entry[2], 24 + (index - 1) * 162, function()
+                if key == "home" then OpenPicker(selectedButton)
+                elseif key == "buffs" then OpenBuffs()
+                else OpenBlessings() end
+            end)
+            panel.nav[key] = tab
+        end
+        local divider = panel.home:CreateTexture(nil, "BACKGROUND")
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, resetY - 32)
         divider:SetPoint("TOPLEFT", 349, -43)
         local function Check(key, label, x, y, description, inverted)
-            local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+            local check = CreateFrame("CheckButton", nil, panel.home, "UICheckButtonTemplate")
             check:SetPoint("TOPLEFT", x, y)
             -- Include the label in the hover/click area without stretching the
             -- stock checkbox artwork or overlapping adjacent rows.
@@ -451,24 +675,24 @@ function A.ShowOptions(host)
         panel.player = Check("playerFrame", "Player frame", 18, -93,
             "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
         panel.target = Check("targetFrame", "Target frame", 182, -93,
-            "Enable click healing and watch indicators on the stock friendly target frame. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
+            "Enable click healing, hover tooltips and watch indicators on the stock friendly target and target-of-target frames. Shift + left-click targets the unit; Shift + right-click opens its unit menu by default. All bindings can be changed below.")
         panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -121,
             "Use your assigned plain right-click binding instead of the native unit menu on player and target frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true)
         panel.raidControls = Check("hideRaidControls", "Hide raid controls", 182, -121,
             "Hide Blizzard's raid-control side panel and its tab. Your party and raid unit frames stay visible.")
         panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,
             "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat because combat bindings cannot change based on debuffs. On by default.")
-        Text(panel, "MODIFIERS", 24, -164, "GameFontHighlightSmall")
+        Text(panel.home, "MODIFIERS", 24, -164, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel, label, 75, 24 + ((i - 1) % 4) * 78, -186 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -186 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
             panel.tabs[i]:EnableSelectionGlow()
         end
-        panel.mouse = A.CreateMouseBindings(panel, OpenPicker, function(button, index)
+        panel.mouse = A.CreateMouseBindings(panel.home, OpenPicker, function(button, index)
             GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
             GameTooltip:SetText(A.modifiers[selected].label .. A.buttons[index], 1, 0.82, 0)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
@@ -478,18 +702,17 @@ function A.ShowOptions(host)
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}
         end
-        panel.blessings = Button(panel, "Paladin blessings...", 315, 24, -526, OpenBlessings)
-        Button(panel, "Reset all bindings", 155, 24, -resetY, function()
+        Button(panel.home, "Reset all bindings", 155, 24, -resetY, function()
             A.ResetBindings()
             OpenPicker(selectedButton)
         end)
-        panel.resetSettings = Button(panel, "Reset settings", 155, 184, -resetY, function()
+        panel.resetSettings = Button(panel.home, "Reset settings", 155, 184, -resetY, function()
             A.ResetOptions()
             Update()
         end)
-        panel.status = Text(panel, "", 24, -resetY - 34, "GameFontHighlightSmall")
-        panel.done = Button(panel, "Done", 100, 655, -resetY - 26, function() panel:Hide() end)
-        panel:SetScript("OnHide", function() if picker then picker:Hide() end; if toolsPane then toolsPane:Hide() end end)
+        panel.status = Text(panel, "", 24, -resetY - 66, "GameFontHighlightSmall")
+        panel.done = Button(panel, "Done", 100, 655, -resetY - 58, A.CloseOptions)
+        panel:SetScript("OnHide", function() if picker then picker:Hide() end; if toolsPane then toolsPane:Hide() end; if buffPane then buffPane:Hide() end end)
         for _, event in ipairs({"PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "SPELLS_CHANGED"}) do panel:RegisterEvent(event) end
         panel:SetScript("OnEvent", Update)
     end
@@ -499,11 +722,7 @@ function A.ShowOptions(host)
 end
 function A.ToggleOptions()
     if panel and panel:IsVisible() then
-        if panel.embeddedHost and HideUIPanel then
-            local root = SettingsPanel and SettingsPanel:IsShown() and SettingsPanel
-                or InterfaceOptionsFrame and InterfaceOptionsFrame:IsShown() and InterfaceOptionsFrame
-            if root then HideUIPanel(root) else panel:Hide() end
-        else panel:Hide() end
+        A.CloseOptions()
     else A.ShowOptions() end
 end
 

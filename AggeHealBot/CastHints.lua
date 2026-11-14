@@ -22,14 +22,14 @@ function A.CastProblem(spell, unit)
     local sameOK, same = pcall(UnitIsUnit, unit, "player")
     if range and unit and sameOK and not secret(same) and same == false then
         local ok, value = pcall(range, spell, unit)
-        if ok and not secret(value) and (value == false or value == 0) then return "Out of range" end
+        if ok and not secret(value) and (value == false or value == 0) then return "Too far" end
     end
     local usable = C_Spell and C_Spell.IsSpellUsable or IsUsableSpell
     local unavailable
     if usable then
         local ok, canCast, insufficientPower = pcall(usable, spell)
         if ok and not secret(canCast) and not secret(insufficientPower) then
-            if insufficientPower == true then return "Not enough mana / power" end
+            if insufficientPower == true then return "Not enough mana" end
             unavailable = canCast == false
         end
     end

@@ -57,10 +57,12 @@ The spell picker opens on **Suggested**, combining heals, buffs and utility. **A
 
 Missing-buff priority is **on by default**. It applies only outside combat and only when plain left click is assigned a spell. Every cast still requires a click.
 
+Use the top **Home**, **Watchers** and **Paladin** tabs in `/ahb`. Home contains bindings and general settings. Watchers shows buffs and cures side by side: enable or disable individual spells, change their order with up/down arrows, and choose **Cures first** or **Buffs first**. Choices save for the current character. **Restore watcher defaults** restores the original lists and priorities; **Reset settings** also resets these choices. The default remains cures before buffs, using debuff order until cure priorities are customized. Resurrection stays first. Unlearned spells remain configurable and activate when trained. Paladin contains the blessing rule for each recipient class and stays greyed out for other classes. Shaman has no automatic buff list; its buffs remain manually bindable.
+
 - Druid: Mark of the Wild, then Thorns. Gift of the Wild satisfies Mark.
 - Priest: Fortitude, Divine Spirit and Shadow Protection, when learned. Their group versions satisfy the corresponding buff.
 
-Paladins get a **Paladin blessings...** button in `/ahb`. Suggested defaults use Might for warriors and rogues, and Wisdom for everyone else, including druids regardless of form. Choose a different blessing for druids with their class override. Auto falls back to Kings if the suggested spell is unlearned and Kings is available. Each class has a dropdown for Auto, Might, Wisdom, Kings or Off, alongside its class icon and colored name. Click Paladin blessings again to return to bindings. Only one selected blessing is watched per class, and equivalent greater blessings satisfy the watch. The watcher casts single-target blessings rather than reagent-consuming group versions. Shaman buffs remain manually bindable without automatic watch rules. Cure and resurrection watching support all four healer classes.
+Paladins use the **Paladin** tab in `/ahb`. Suggested defaults use Might for warriors and rogues, and Wisdom for everyone else, including druids regardless of form. Choose a different blessing for druids with their class override. Auto falls back to Kings if the suggested spell is unlearned and Kings is available. Each class has a dropdown for Auto, Might, Wisdom, Kings or Off, alongside its class icon and colored name. Use Home to return to bindings. Only one selected blessing is watched per class, and equivalent greater blessings satisfy the watch. The watcher casts single-target blessings rather than reagent-consuming group versions. Shaman buffs remain manually bindable without automatic watch rules. Cure and resurrection watching support all four healer classes.
 
 Once the unit has its buffs, left click returns to its assigned spell. The buff icon and outline disappear when buffs are complete, combat begins, a modifier is held or buff priority is turned off. Unreachable buff targets are blocked instead of falling through to another spell.
 
@@ -70,11 +72,13 @@ The watcher compares your highest learned single-target buff rank with the activ
 
 If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
-Target-frame click healing and buff watching are **on by default** and can be switched off in `/ahb`.
+Target and target-of-target click healing, hover tooltips and player-only watching are **on by default** and share the Target frame toggle in `/ahb`. Friendly units use your normal bindings, while enemy frames keep their stock interactions. Player names in the binding tooltip use their class color.
+
+The tooltip puts class and known spec on one row. Hovering an eligible player can request inspection outside combat; the spec appears when the response arrives and is cached for one hour per player, including across reloads. Cached specs remain visible during combat without talent queries or inspection requests. Forever/classic talent data uses the tree with the most spent points when there is a clear leader. Generic class labels and unknown or tied results are not shown as specs.
 
 **Override rightclick** is on by default. Your player and target frames use their assigned plain right-click bindings. Turn it off in `/ahb` to open the native unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged. Existing saved preferences are preserved.
 
-Outside combat, plain left-click prioritizes a learned reagent-free resurrection on a dead friendly player, then a learned cure for a removable debuff, then missing buffs, then your assigned heal. Resurrection has a pale-blue glow, and cure watching has a red glow. Cure watching can be disabled in `/ahb`.
+By default, outside combat, plain left-click prioritizes a learned reagent-free resurrection on a dead friendly player, then a learned cure for a removable debuff, then missing buffs, then your assigned heal. The Watchers tab can put buffs before cures; resurrection stays first. Resurrection has a pale-blue glow, and cure watching has a red glow. Cure watching can be disabled in `/ahb`.
 
 Automatic buff, cure and resurrection watches apply only to players. NPCs support your normal click bindings.
 

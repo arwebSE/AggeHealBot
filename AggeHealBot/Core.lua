@@ -7,17 +7,24 @@ local class
 local spellDetails = {}
 local openUnitMenu, openUnitMenuUnit
 local raidControlsHiddenByUs = false
+local raidControlsParent, raidControlsHolder, raidControlsWasShown
 local rejectedBuffs, pendingBuffAttempt = {}, nil
 local hoveredFrame, hoveredRegion, addonTooltip
 local hoverHooks = {}
-local targetVisibilityDriver
+local targetVisibilityDrivers = {}
 local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
     combatResurrection = false, playerFrame = true, targetFrame = true,
     rightClickMenu = false, hideRaidControls = true,
     showUnlearned = false,
+    buffsBeforeCures = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
+local function ReadFlag(fn, ...)
+    if not fn then return end
+    local ok, value = pcall(fn, ...)
+    if ok and not secret(value) then return value end
+end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
 local function SpellName(id)
     if not names[id] then
@@ -121,11 +128,19 @@ local function Unit(frame)
     if secret(unit) or type(unit) ~= "string" then return end
     return unit
 end
+local function TargetUnit(frame)
+    if frame == A.targetButton then return "target" end
+    if frame == A.targetOfTargetButton then return "targettarget" end
+end
+local function TargetVisual(frame)
+    if frame == A.targetButton then return TargetFrame end
+    if frame == A.targetOfTargetButton then return TargetFrameToT or (TargetFrame and TargetFrame.totFrame) end
+end
 local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
     local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
-    if not (frame == A.targetButton or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
+    if not (TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
         or name:match("^PartyFrameMemberFrame%d+$") or name:match("^CompactPartyFrameMember%d+$")
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
@@ -241,13 +256,50 @@ local function PaladinBuffGroups(unit)
     local group = A.paladinBlessings[rule]
     return group and {group} or {}
 end
+local function CureWatchDefaults()
+    local result, byName = {}, {}
+    for _, entry in ipairs(A.dispels[class] or {}) do
+        local name = SpellName(entry[1]) or tostring(entry[1])
+        local group = byName[name]
+        if not group then
+            group = {entry[1]}
+            group.ids, group.types = {}, {}
+            byName[name] = group
+            result[#result + 1] = group
+        end
+        group.ids[#group.ids + 1] = entry[1]
+        for index = 2, #entry do
+            if not group.types[entry[index]] then
+                group[#group + 1], group.types[entry[index]] = entry[index], true
+            end
+        end
+    end
+    return result
+end
+local function BuffWatchGroups(includeDisabled, kind)
+    local defaults = kind == "cures" and CureWatchDefaults() or A.buffs[class] or {}
+    local saved = AggeHealBotDB[kind == "cures" and "cureWatchRules" or "buffWatch"]
+    if type(saved) ~= "table" or saved.class ~= class then saved = nil end
+    local byID, result, seen = {}, {}, {}
+    for _, group in ipairs(defaults) do byID[group[1]] = group end
+    local function Add(id)
+        if not byID[id] or seen[id] then return end
+        seen[id] = true
+        if includeDisabled or not (saved and type(saved.disabled) == "table" and saved.disabled[id]) then
+            result[#result + 1] = byID[id]
+        end
+    end
+    if saved and type(saved.order) == "table" then for _, id in ipairs(saved.order) do Add(id) end end
+    for _, group in ipairs(defaults) do Add(group[1]) end
+    return result
+end
 local function MissingBuff(unit)
-    if not AggeHealBotDB.smartBuffs or not unit or not UnitExists(unit)
-        or not UnitCanAssist("player", unit) or UnitIsDeadOrGhost(unit) then return end
+    if not AggeHealBotDB.smartBuffs or not unit or ReadFlag(UnitExists, unit) ~= true
+        or ReadFlag(UnitCanAssist, "player", unit) ~= true or ReadFlag(UnitIsDeadOrGhost, unit) ~= false then return end
     local present, evidence, auras = HelpfulAuras(unit)
     if not present then return end
     local guid = UnitKey(unit)
-    local groups = class == "PALADIN" and PaladinBuffGroups(unit) or A.buffs[class] or {}
+    local groups = class == "PALADIN" and PaladinBuffGroups(unit) or BuffWatchGroups()
     for _, group in ipairs(groups) do
         local definition = A.buffRanks[group[1]]
         local name = Resolve({group[1]}) or (definition and Resolve(definition.ranks))
@@ -261,18 +313,10 @@ local function Set(frame, key, value)
     if frame:GetAttribute(key) ~= value then frame:SetAttribute(key, value) end
 end
 local function BuffInRange(spell, unit)
-    if not unit or not UnitExists(unit) or not UnitIsConnected(unit) then return false end
-    if UnitIsUnit(unit, "player") then return true end
-    local result
-    if C_Spell and C_Spell.IsSpellInRange then result = C_Spell.IsSpellInRange(spell, unit)
-    elseif IsSpellInRange then result = IsSpellInRange(spell, unit) end
-    if secret(result) then return false end
+    if not unit or ReadFlag(UnitExists, unit) ~= true or ReadFlag(UnitIsConnected, unit) ~= true then return false end
+    if ReadFlag(UnitIsUnit, unit, "player") == true then return true end
+    local result = ReadFlag(C_Spell and C_Spell.IsSpellInRange or IsSpellInRange, spell, unit)
     return result == true or result == 1
-end
-local function ReadFlag(fn, ...)
-    if not fn then return end
-    local ok, value = pcall(fn, ...)
-    if ok and not secret(value) then return value end
 end
 local function WatchAllowed(unit)
     if not unit then return false end
@@ -291,11 +335,11 @@ local function CureCandidate(unit, allowCombat)
     if not AggeHealBotDB.cureWatch or not unit or ReadFlag(UnitCanAssist, "player", unit) ~= true
         or ReadFlag(UnitIsDeadOrGhost, unit) ~= false then return end
     local available = {}
-    for _, entry in ipairs(A.dispels[class] or {}) do
-        local spell = Resolve({entry[1]})
+    for priority, entry in ipairs(BuffWatchGroups(false, "cures")) do
+        local spell = Resolve(entry.ids or {entry[1]})
         if spell then
             for i = 2, #entry do
-                if not available[entry[i]] then available[entry[i]] = {spell, entry[1]} end
+                if not available[entry[i]] then available[entry[i]] = {spell, entry[1], priority} end
             end
         end
     end
@@ -303,10 +347,11 @@ local function CureCandidate(unit, allowCombat)
     local auras = ReadAuras(unit, "HARMFUL", allowCombat)
     if not auras then return end
     local candidate, debuff
+    local custom = type(AggeHealBotDB.cureWatchRules) == "table" and AggeHealBotDB.cureWatchRules.class == class
     for _, aura in ipairs(auras) do
         if secret(aura.dispelName) or secret(aura.name) then return end
         local cure = aura.dispelName and available[aura.dispelName]
-        if cure and not candidate then candidate, debuff = cure, aura.name end
+        if cure and (not candidate or (custom and cure[3] < candidate[3])) then candidate, debuff = cure, aura.name end
     end
     if candidate then return candidate[1], candidate[2], debuff end
 end
@@ -326,12 +371,10 @@ local function UpdateCombatWatch(frame)
     A.UpdateBuffIndicator(frame, visible and spell or nil, id, kind)
 end
 local function HealOutOfRange(spell, unit)
-    if not unit or not UnitExists(unit) or not UnitIsConnected(unit) then return true end
-    if UnitIsUnit(unit, "player") then return false end
-    local result
-    if C_Spell and C_Spell.IsSpellInRange then result = C_Spell.IsSpellInRange(spell, unit)
-    elseif IsSpellInRange then result = IsSpellInRange(spell, unit) end
-    if secret(result) then return false end
+    if not unit then return true end
+    if ReadFlag(UnitExists, unit) == false or ReadFlag(UnitIsConnected, unit) == false then return true end
+    if ReadFlag(UnitIsUnit, unit, "player") == true then return false end
+    local result = ReadFlag(C_Spell and C_Spell.IsSpellInRange or IsSpellInRange, spell, unit)
     -- Spells without a conventional range (e.g. self-centered area spells)
     -- can return nil. The explicit-target macro still prevents a target cursor.
     return result == false or result == 0
@@ -353,7 +396,7 @@ local function TargetMacro(frame)
     -- explicit secure macro keeps targeting within our own saved bindings.
     -- A distant group member may not resolve as mouseover. Use the frame's
     -- actual unit token so selecting someone never depends on spell range.
-    local unit = frame == PlayerFrame and "player" or frame == A.targetButton and "target" or Unit(frame)
+    local unit = frame == PlayerFrame and "player" or TargetUnit(frame) or Unit(frame)
     if not unit then return end
     return "/target [@" .. unit .. ",exists]"
 end
@@ -400,7 +443,7 @@ local function MenuButton(frame)
     return state.menuButton
 end
 local function BindingAction(frame, binding)
-    if (frame == PlayerFrame or frame == A.targetButton) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
+    if (frame == PlayerFrame or TargetUnit(frame)) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
     return binding.action
 end
 local function ShowFrameTooltip(frame)
@@ -423,8 +466,14 @@ local function ShowFrameTooltip(frame)
     if unit then
         -- Leave Blizzard's unit details intact, including its normal live
         -- refreshes; our binding information lives in a separate panel.
-        local ownsResourceTip = hoveredFrame == frame and hoveredRegion and GameTooltip:IsOwned(hoveredRegion)
-        if not GameTooltip:IsOwned(frame) and not ownsResourceTip then
+        local ownsResourceTip = hoveredFrame == frame and hoveredRegion and hoveredRegion ~= frame
+            and GameTooltip:IsOwned(hoveredRegion)
+        local needsAnchor = not GameTooltip:IsOwned(frame)
+        if not ownsResourceTip and GameTooltip.GetAnchorType then
+            local ok, kind = pcall(GameTooltip.GetAnchorType, GameTooltip)
+            if ok and not secret(kind) and kind ~= "ANCHOR_NONE" then needsAnchor = true end
+        end
+        if needsAnchor and not ownsResourceTip then
             -- The friendly-target click surface has no native OnEnter to
             -- position GameTooltip. Use Blizzard's default anchor so it does
             -- not occupy the same frame-relative position as our panel.
@@ -439,33 +488,91 @@ local function ShowFrameTooltip(frame)
         GameTooltip:Show()
     end
     local tooltip = addonTooltip
-    tooltip:SetOwner(frame, "ANCHOR_RIGHT")
+    tooltip:SetOwner(frame, "ANCHOR_NONE")
+    local visual = TargetVisual(frame) or frame
+    local content = visual.TargetFrameContent and visual.TargetFrameContent.TargetFrameContentMain
+    local anchor = visual.healthbar or visual.healthBar or visual.HealthBar
+        or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar) or visual
+    if frame == A.targetButton then
+        anchor = (visual.GetPortrait and visual:GetPortrait()) or visual.portrait or _G.TargetFramePortrait or anchor
+    end
+    tooltip:ClearAllPoints()
+    tooltip:SetPoint("BOTTOMLEFT", anchor, "TOPRIGHT", 8, 8)
     tooltip:SetClampedToScreen(true)
     local name = unit and UnitName and UnitName(unit)
     if secret(name) or type(name) ~= "string" then name = "Unit" end
+    -- Reset reused line-two regions before an NPC/binding row takes their place.
+    local oldLeft = _G.AggeHealBotTooltipTextLeft2
+    local oldRight = _G.AggeHealBotTooltipTextRight2
+    if oldLeft and oldRight then
+        oldLeft:SetAlpha(1)
+        if GameTooltipText then oldLeft:SetFontObject(GameTooltipText); oldRight:SetFontObject(GameTooltipText) end
+        oldRight:ClearAllPoints()
+        oldRight:SetJustifyH("RIGHT")
+        oldRight:SetPoint("RIGHT", tooltip, "RIGHT", -10, 0)
+        oldRight:SetPoint("TOP", oldLeft, "TOP", 0, 0)
+    end
+    if tooltip.ahbInlineSpec then tooltip.ahbInlineSpec:Hide() end
+    if tooltip.ahbHeaderParts then
+        for _, text in pairs(tooltip.ahbHeaderParts) do text:Hide() end
+    end
     tooltip:ClearLines()
-    tooltip:AddDoubleLine(name, "AggeHealBot", 1, 0.82, 0, 0.5, 1, 0.7)
+    local r, g, b = 1, 0.82, 0
+    local classLabel
+    if unit and UnitClass and UnitIsPlayer then
+        local playerOK, isPlayer = pcall(UnitIsPlayer, unit)
+        local classOK, localizedClass, classToken = pcall(UnitClass, unit)
+        if playerOK and not secret(isPlayer) and isPlayer == true and classOK
+            and not secret(localizedClass) and type(localizedClass) == "string" then classLabel = localizedClass end
+        if playerOK and not secret(isPlayer) and isPlayer == true and classOK
+            and not secret(classToken) and type(classToken) == "string" then
+            local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+            if color then r, g, b = color.r, color.g, color.b end
+        end
+    end
+    local title = name
+    local levelText
+    if unit and UnitLevel then
+        local ok, level = pcall(UnitLevel, unit)
+        if ok and not secret(level) and type(level) == "number" then
+            if level > 0 then levelText = tostring(level)
+            elseif level == -1 then levelText = "??" end
+        end
+    end
+    if levelText then title = name .. " |cffffffff·|r |cffffd100Lv" .. levelText .. "|r" end
+    tooltip:AddDoubleLine(title, "AggeHealBot", r, g, b, 0.5, 1, 0.7)
     local heading = _G.AggeHealBotTooltipTextLeft1
     local label = _G.AggeHealBotTooltipTextRight1
     if heading and GameTooltipHeaderText then
+        heading:SetAlpha(1)
         heading:SetFontObject(GameTooltipHeaderText)
-        heading:SetTextColor(1, 0.82, 0)
+        heading:SetTextColor(r, g, b)
     end
     if label and GameFontHighlightSmall then
         label:SetFontObject(GameFontHighlightSmall)
         label:SetTextColor(0.5, 1, 0.7)
     end
+    local spec = A.GetUnitSpec(unit)
+    local details = spec
+    if classLabel and details then tooltip:AddDoubleLine(details, classLabel, 0.8, 0.8, 0.8, r, g, b)
+    elseif classLabel then
+        -- An empty spec column has zero text height. Anchoring the larger class
+        -- to it pulls the class into the name row; let the tooltip lay out a
+        -- real class-only line when inspection data is not available.
+        tooltip:AddLine(classLabel, r, g, b)
+        local classOnly = _G.AggeHealBotTooltipTextLeft2
+        if classOnly and GameFontHighlight then classOnly:SetFontObject(GameFontHighlight) end
+    elseif details then tooltip:AddLine(details, 0.8, 0.8, 0.8) end
+    local specText = classLabel and details and _G.AggeHealBotTooltipTextLeft2
+    local classText = classLabel and details and _G.AggeHealBotTooltipTextRight2
+    if specText and classText then
+        if GameFontHighlightSmall then specText:SetFontObject(GameFontHighlightSmall) end
+        if GameFontHighlight then classText:SetFontObject(GameFontHighlight) end
+        classText:SetTextColor(r, g, b)
+    end
     local prefix = (IsAltKeyDown and IsAltKeyDown() and "alt-" or "")
         .. (IsControlKeyDown and IsControlKeyDown() and "ctrl-" or "")
         .. (IsShiftKeyDown and IsShiftKeyDown() and "shift-" or "")
-    if prefix ~= "" then
-        for _, binding in ipairs(bindings) do
-            if binding.prefix == prefix and BindingAction(frame, binding) == "settings" then
-                tooltip:AddLine(binding.label .. " Click to open AggeHealBot Menu.", 1, 1, 1)
-                break
-            end
-        end
-    end
     if InCombatLockdown() and state.combatResActive then
         tooltip:AddLine("Left click: " .. state.combatResSpell .. " (combat resurrection)", 0.65, 0.95, 1)
     elseif InCombatLockdown() and state.combatCureSpell then
@@ -497,12 +604,57 @@ local function ShowFrameTooltip(frame)
         end
     end
     tooltip:Show()
+    if heading and levelText then
+        if not tooltip.ahbHeaderParts then
+            tooltip.ahbHeaderParts = {
+                name = tooltip:CreateFontString(nil, "OVERLAY", "GameTooltipHeaderText"),
+                label = tooltip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
+                value = tooltip:CreateFontString(nil, "OVERLAY", "GameTooltipHeaderText"),
+            }
+        end
+        local parts = tooltip.ahbHeaderParts
+        parts.name:ClearAllPoints()
+        parts.name:SetPoint("BOTTOMLEFT", heading, "BOTTOMLEFT", 0, 0)
+        parts.name:SetText(name .. " |cffffffff·|r")
+        parts.name:SetTextColor(r, g, b)
+        parts.label:ClearAllPoints()
+        parts.label:SetPoint("BOTTOMLEFT", parts.name, "BOTTOMRIGHT", 4, 2)
+        parts.label:SetText("Lv")
+        parts.label:SetTextColor(1, 0.82, 0)
+        parts.value:ClearAllPoints()
+        parts.value:SetPoint("BOTTOMLEFT", parts.label, "BOTTOMRIGHT", 1, -2)
+        parts.value:SetText(levelText)
+        parts.value:SetTextColor(1, 0.82, 0)
+        heading:SetAlpha(0)
+        for _, text in pairs(parts) do text:Show() end
+    end
+    if specText and classText then
+        classText:ClearAllPoints()
+        classText:SetJustifyH("LEFT")
+        if details then
+            -- Tooltip measurements can become secret. Let the UI anchor to an
+            -- unconstrained addon-owned text region; never read its width.
+            if not tooltip.ahbInlineSpec then
+                tooltip.ahbInlineSpec = tooltip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            end
+            local inline = tooltip.ahbInlineSpec
+            inline:ClearAllPoints()
+            inline:SetPoint("BOTTOMLEFT", specText, "BOTTOMLEFT", 0, 0)
+            inline:SetText(details)
+            inline:SetTextColor(0.8, 0.8, 0.8)
+            inline:Show()
+            specText:SetAlpha(0)
+            classText:SetPoint("BOTTOMLEFT", inline, "BOTTOMRIGHT", 4, -1)
+        else
+            classText:SetPoint("BOTTOMLEFT", specText, "BOTTOMLEFT", 0, -1)
+        end
+    end
 end
 local function HookHover(frame, region)
     if not region or not region.HookScript or hoverHooks[region] then return end
     hoverHooks[region] = true
     region:HookScript("OnEnter", function(self)
-        if not frames[frame] or (frame == A.targetButton and not frame:IsShown()) then return end
+        if not frames[frame] or (TargetUnit(frame) and not frame:IsShown()) then return end
         hoveredFrame, hoveredRegion = frame, self
         if not InCombatLockdown() then Apply(frame) end
         ShowFrameTooltip(frame)
@@ -526,7 +678,7 @@ Apply = function(frame)
         frames[frame] = {original = {}, bindingDrivers = {}}
     end
     HookHover(frame, frame)
-    local visual = frame == A.targetButton and TargetFrame or frame
+    local visual = TargetVisual(frame) or frame
     local content = visual.TargetFrameContent and visual.TargetFrameContent.TargetFrameContentMain
     HookHover(frame, visual.healthbar or visual.healthBar or visual.HealthBar
         or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar))
@@ -597,7 +749,7 @@ Apply = function(frame)
         if not (b.prefix == "" and b.button == 1) then
             Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
             local macro = bindingAction == "target" and TargetMacro(frame)
-                or bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, frame == A.targetButton and "target" or nil) or nil
+                or bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, TargetUnit(frame)) or nil
             Set(frame, b.prefix .. "macrotext" .. b.button, macro)
         end
     end
@@ -621,8 +773,9 @@ Apply = function(frame)
     local res = ResurrectionCandidate(unit, normalRes or combatRes)
     local cure, cureID, debuff
     if watches and not res then cure, cureID, debuff = CureCandidate(unit) end
+    if cure and not (AggeHealBotDB.buffsBeforeCures and buff) then buff, buffID = cure, cureID
+    else cure, debuff = nil, nil end
     frames[frame].cure = cure and (debuff or "Removable debuff") or nil
-    if cure then buff, buffID = cure, cureID end
     frames[frame].resurrection = res ~= nil
     if res then buff, buffID = res, normalRes and normalResIDs[1] or combatResIDs[1] end
     frames[frame].combatResSpell, frames[frame].combatResID = combatRes, combatResIDs[1]
@@ -648,9 +801,9 @@ Apply = function(frame)
     -- Keep the complete macro intact; its own conditions select combat healing.
     local livingSpell = buff or heal
     if res then livingSpell = heal end
-    Set(frame, "macrotext1", livingSpell and CastMacro(livingSpell, heal, frame == A.targetButton and "target" or nil) or nil)
+    Set(frame, "macrotext1", livingSpell and CastMacro(livingSpell, heal, TargetUnit(frame)) or nil)
     if normalRes or combatRes then
-        local target = frame == A.targetButton and "target" or "mouseover"
+        local target = TargetUnit(frame) or "mouseover"
         local clauses = {}
         if combatRes then
             clauses[#clauses + 1] = "[combat,@" .. target .. ",help,dead,party] " .. combatRes
@@ -684,7 +837,7 @@ Apply = function(frame)
 end
 local function Register(frame)
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
-    if frame == A.targetButton and not AggeHealBotDB.targetFrame then return end
+    if TargetUnit(frame) and not AggeHealBotDB.targetFrame then return end
     if Eligible(frame) and not InCombatLockdown() then Apply(frame) end
 end
 local function HookFunctions()
@@ -718,18 +871,22 @@ local function RestoreFrame(frame)
     end
     frames[frame] = nil
 end
-local function RegisterTargetFrame()
-    if not TargetFrame or (not AggeHealBotDB.targetFrame and not A.targetButton) then return end
-    if not A.targetButton then
+local function RegisterTargetSurface(visual, key, unit, name)
+    if not visual or (not AggeHealBotDB.targetFrame and not A[key]) then return end
+    if not A[key] then
         -- A secure friendly-only click surface leaves the stock target button
         -- and enemy interactions intact, including target switches in combat.
-        local button = CreateFrame("Button", "AggeHealBotTargetButton", TargetFrame, "SecureUnitButtonTemplate")
-        button:SetAllPoints(TargetFrame)
-        local level = TargetFrame:GetFrameLevel()
+        local button = CreateFrame("Button", name, visual, "SecureUnitButtonTemplate")
+        button:SetAllPoints(visual)
+        local level = visual:GetFrameLevel()
+        if unit == "targettarget" and A.targetButton then
+            local targetLevel = A.targetButton:GetFrameLevel()
+            if not secret(level) and not secret(targetLevel) then level = math.max(level, targetLevel) end
+        end
         if not secret(level) then button:SetFrameLevel(level + 1) end
         button:EnableMouse(true)
-        button.unit = "target"
-        button:SetAttribute("unit", "target")
+        button.unit = unit
+        button:SetAttribute("unit", unit)
         button:HookScript("OnHide", function(self)
             A.UpdateBuffIndicator(self)
             if hoveredFrame == self then
@@ -738,20 +895,22 @@ local function RegisterTargetFrame()
                 if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
             end
         end)
-        A.targetButton = button
+        A[key] = button
     end
-    local visibility = AggeHealBotDB.targetFrame and "[@target,exists,help] show; hide" or "hide"
-    if targetVisibilityDriver ~= visibility then
-        RegisterStateDriver(A.targetButton, "visibility", visibility)
-        targetVisibilityDriver = visibility
+    local button = A[key]
+    local visibility = AggeHealBotDB.targetFrame and ("[@" .. unit .. ",exists,help] show; hide") or "hide"
+    if targetVisibilityDrivers[button] ~= visibility then
+        RegisterStateDriver(button, "visibility", visibility)
+        targetVisibilityDrivers[button] = visibility
     end
-    if AggeHealBotDB.targetFrame then Register(A.targetButton)
-    else RestoreFrame(A.targetButton) end
+    if AggeHealBotDB.targetFrame then Register(button)
+    else RestoreFrame(button) end
 end
 discover = function()
     HookFunctions()
     Register(PlayerFrame)
-    RegisterTargetFrame()
+    RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
+    RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton")
     for i = 1, 5 do
         Register(_G["PartyMemberFrame" .. i])
         Register(_G["PartyFrameMemberFrame" .. i])
@@ -782,12 +941,24 @@ local function ApplyRaidControls()
         hooks.raidControls = true
     end
     if AggeHealBotDB.hideRaidControls then
-        raidControlsHiddenByUs = raidControlsHiddenByUs or manager:IsShown()
+        if not raidControlsHiddenByUs then
+            raidControlsParent = manager:GetParent()
+            raidControlsWasShown = manager:IsShown()
+        end
+        if not raidControlsHolder then
+            raidControlsHolder = CreateFrame("Frame", nil, UIParent)
+            raidControlsHolder:Hide()
+        end
+        -- Keep the sidebar under a hidden ancestor. Blizzard can Show() the
+        -- manager during combat; that must not make the sidebar visible again.
+        if manager:GetParent() ~= raidControlsHolder then manager:SetParent(raidControlsHolder) end
+        raidControlsHiddenByUs = true
         manager:Hide()
     elseif raidControlsHiddenByUs then
         raidControlsHiddenByUs = false
-        if CompactRaidFrameManager_UpdateShown then CompactRaidFrameManager_UpdateShown()
-        else manager:Show() end
+        manager:SetParent(raidControlsParent or UIParent)
+        if CompactRaidFrameManager_UpdateShown then CompactRaidFrameManager_UpdateShown(manager)
+        elseif raidControlsWasShown then manager:Show() end
     end
 end
 refresh = function()
@@ -808,6 +979,71 @@ end
 A.GetBindings = function() return bindings end
 A.GetPlayerClass = function() return class end
 A.IsSpellLearned = IsLearned
+local function GetWatchList(kind)
+    local saved = AggeHealBotDB[kind == "cures" and "cureWatchRules" or "buffWatch"]
+    if type(saved) ~= "table" or saved.class ~= class then saved = nil end
+    local list = {}
+    for _, group in ipairs(BuffWatchGroups(true, kind)) do
+        local id, definition = group[1], kind ~= "cures" and A.buffRanks[group[1]]
+        local learnedName = Resolve(group.ids or (definition and definition.ranks) or {id})
+        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+        list[#list + 1] = {id = id, name = SpellName(id) or learnedName or ("Spell #" .. id),
+            icon = info and info.iconID or 134400, learned = learnedName ~= nil,
+            enabled = not (saved and type(saved.disabled) == "table" and saved.disabled[id]),
+            kinds = kind == "cures" and table.concat(group, ", ", 2) or nil}
+    end
+    return list
+end
+A.GetBuffWatchList = function() return GetWatchList("buffs") end
+A.GetCureWatchList = function() return GetWatchList("cures") end
+local function EditableBuffWatch(id, kind)
+    local list, valid = GetWatchList(kind), false
+    for _, entry in ipairs(list) do if entry.id == id then valid = true end end
+    if not valid then return end
+    local key = kind == "cures" and "cureWatchRules" or "buffWatch"
+    local saved = AggeHealBotDB[key]
+    if type(saved) ~= "table" or saved.class ~= class then
+        saved = {class = class, disabled = {}}
+        AggeHealBotDB[key] = saved
+    end
+    saved.disabled = type(saved.disabled) == "table" and saved.disabled or {}
+    saved.order = {}
+    for _, entry in ipairs(list) do saved.order[#saved.order + 1] = entry.id end
+    return saved
+end
+function A.SetBuffWatchEnabled(id, enabled, kind)
+    local saved = EditableBuffWatch(id, kind)
+    if not saved then return false end
+    saved.disabled[id] = not enabled or nil
+    Queue()
+    return true
+end
+function A.MoveBuffWatch(id, direction, kind)
+    if direction ~= -1 and direction ~= 1 then return false end
+    local saved = EditableBuffWatch(id, kind)
+    if not saved then return false end
+    for index, value in ipairs(saved.order) do
+        if value == id then
+            local other = index + direction
+            if other < 1 or other > #saved.order then return false end
+            saved.order[index], saved.order[other] = saved.order[other], saved.order[index]
+            Queue()
+            return true
+        end
+    end
+    return false
+end
+A.SetCureWatchEnabled = function(id, enabled) return A.SetBuffWatchEnabled(id, enabled, "cures") end
+A.MoveCureWatch = function(id, direction) return A.MoveBuffWatch(id, direction, "cures") end
+function A.ResetBuffWatch()
+    AggeHealBotDB.buffWatch = nil
+    Queue()
+end
+function A.ResetWatchers()
+    AggeHealBotDB.buffWatch, AggeHealBotDB.cureWatchRules = nil, nil
+    AggeHealBotDB.buffsBeforeCures = false
+    Queue()
+end
 local function Passive(id, detail)
     if detail and detail.passive then return true end
     return id and C_Spell and C_Spell.IsSpellPassive and C_Spell.IsSpellPassive(id) == true
@@ -897,6 +1133,8 @@ end
 A.ResetOptions = function()
     for key, value in pairs(optionDefaults) do AggeHealBotDB[key] = value end
     AggeHealBotDB.paladinBlessings = nil
+    AggeHealBotDB.buffWatch = nil
+    AggeHealBotDB.cureWatchRules = nil
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end
@@ -935,7 +1173,7 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
@@ -988,6 +1226,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
         end)
         Print("v" .. A.version .. " loaded. /ahb for bindings and settings.")
     elseif ready then
+        if event == "INSPECT_READY" then
+            A.UnitSpecReady(arg)
+            if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
+            return
+        end
         if event == "UNIT_POWER_UPDATE" or event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_COOLDOWN" then
             if InCombatLockdown() or (event == "UNIT_POWER_UPDATE" and (secret(arg) or arg ~= "player")) then return end
             -- Mana and cooldown ticks update hints, not aura scans or secure
@@ -1011,6 +1254,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             pendingBuffAttempt = nil
             A.UpdateBuffIndicator(A.targetButton)
             if hoveredFrame == A.targetButton and addonTooltip then addonTooltip:Hide() end
+        end
+        if (event == "PLAYER_TARGET_CHANGED" or (event == "UNIT_TARGET" and not secret(arg) and arg == "target"))
+            and A.targetOfTargetButton then
+            pendingBuffAttempt = nil
+            A.UpdateBuffIndicator(A.targetOfTargetButton)
+            if hoveredFrame == A.targetOfTargetButton and addonTooltip then addonTooltip:Hide() end
         end
         if event == "UI_ERROR_MESSAGE" then
             if not pendingBuffAttempt or InCombatLockdown() or secret(arg) or secret(message) then return end

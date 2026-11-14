@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.10 — 2026-11-14
+
+- Add Home, Watchers and Paladin tabs using the talent window's native artwork. Keep tab sizing and fonts consistent, show a checkmark on the selected tab, and lock Paladin for other classes.
+- Combine buffs and cures in Watchers. Enable or disable individual watched spells, reorder them, and choose Cures first (default) or Buffs first. Save choices per character and offer a restore-defaults button. Existing defaults are unchanged; resurrection remains first.
+- Support friendly target-of-target frames with hover tooltips, healing bindings, targeting, secure unit menus and player-only watchers. The Target frame toggle controls both target frames.
+- Show class-colored names, a white separator dot and a gold level with a smaller Lv label. Put a known spec beside the slightly larger class name, with a clean class-only row when the spec is unknown.
+- Read Forever's native talent-group data, request inspection for eligible players with throttling, and cache confirmed specs by player GUID for one hour across reloads. Show cached specs during combat without talent queries or inspection requests.
+- Bring the binding tooltip closer to visible frame edges and keep Blizzard's native unit tooltip in its separate default position. Shorten availability hints to Not enough mana and Too far.
+- Replace blocky party/raid glow corners with softly rounded matching masks. Fit target-of-target glow to its actual Blizzard border artwork.
+- Allow X, Done and the settings toggle to close the editor during combat. Keep raid controls hidden through stock combat refreshes and restore their parent safely when the setting is disabled.
+- Fix secret-value errors in tooltip text layout and unit identity, existence, connection and range checks. Use native anchors instead of arithmetic on restricted measurements and defer protected binding edits until combat ends.
+
 ## 1.0.9 — 2026-11-14
 
 - Explain unavailable spells with Mounted, Dead, Ghost or In a vehicle when the player's state is safely readable. Keep the generic fallback for unknown causes and retain range, resource and cooldown hints.

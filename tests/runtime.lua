@@ -55,6 +55,7 @@ local function Region()
     function r:SetTexCoord(...) self.texCoords = {...} end
     function r:ClearAllPoints() end
     function r:SetText(value) self.text = value end
+    function r:SetFontObject(value) self.fontObject = value end
     function r:CreateAnimationGroup()
         local group = {playing = false, plays = 0}
         function group:SetLooping(value) self.looping = value end
@@ -75,17 +76,27 @@ local function Region()
     end
     function r:Hide() self.shown = false end
     function r:Show() self.shown = true end
+    function r:SetShown(value) self.shown = value end
     return r
 end
 function CreateFrame(_, name, parent, template)
     local f = {attrs = {}, scripts = {}, name = name, regions = {}, template = template, parent = parent}
     function f:CreateTexture() local r = Region(); self.regions[#self.regions + 1] = r; return r end
+    function f:CreateLine()
+        local line = Region()
+        function line:SetThickness(value) self.thickness = value end
+        function line:SetStartPoint(...) self.startPoint = {...} end
+        function line:SetEndPoint(...) self.endPoint = {...} end
+        return line
+    end
     function f:CreateFontString() local r = Region(); self.regions[#self.regions + 1] = r; return r end
     function f:GetName() return self.name end
+    function f:GetParent() return self.parent end
     function f:GetFrameLevel() return self.frameLevel or 1 end
     function f:SetFrameLevel(level) self.frameLevel = level end
     function f:SetAllPoints(relative) self.allPoints = relative end
     function f:EnableMouse() end
+    function f:SetShown(value) if value then self:Show() else self:Hide() end end
     function f:SetSize(width, height) self.width, self.height = width, height end
     function f:SetPoint(...) self.point = {...} end
     function f:SetHitRectInsets() end
@@ -155,6 +166,7 @@ local function mouseEdge(frame, button, down, prefix)
 end
 assert(loadfile("AggeHealBot/Defaults.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/CastHints.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/UnitDetails.lua"))("AggeHealBot", ns)
 assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and buff reminders are not supported")
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
@@ -174,7 +186,7 @@ ns.SetOption("rightClickMenu", false)
 assert(#PlayerFrame.clicks == 1 and PlayerFrame.clicks[1] == "AnyDown", "clicks run once on press")
 assert(PlayerFrame.attrs.spell1 == "Mark", "first missing buff")
 assert(PlayerFrame.regions[2].shown and PlayerFrame.regions[2].texture == 101126, "Mark icon shown")
-assert(PlayerFrame.regions[3].shown and PlayerFrame.regions[3].color[1] == 0.8, "Mark glow active")
+assert(PlayerFrame.regions[3].shown and PlayerFrame.regions[3].vertexColor[1] == 0.8, "Mark glow active")
 assert(PlayerFrame.regions[3].animationGroup.playing, "missing buff glow animates")
 assert(PlayerFrame.attrs.spell2 == "Healing Touch")
 assert(PlayerFrame.attrs.spell3 == "Rejuvenation")
@@ -224,7 +236,7 @@ auras.player = {{name = "Gift"}}
 event("UNIT_AURA", "player")
 assert(PlayerFrame.attrs.spell1 == "Thorns", "group buff satisfies Mark")
 assert(PlayerFrame.regions[2].texture == 100467, "indicator advances")
-assert(PlayerFrame.regions[3].color[1] == 1 and PlayerFrame.regions[3].color[2] == 0.6, "glow switches to Thorns color")
+assert(PlayerFrame.regions[3].vertexColor[1] == 1 and PlayerFrame.regions[3].vertexColor[2] == 0.6, "glow switches to Thorns color")
 auras.player[2] = {name = "Thorns"}
 event("UNIT_AURA", "player")
 assert(PlayerFrame.attrs.spell1 == "Regrowth", "all buffs present")
@@ -443,6 +455,9 @@ CreateFrame = function(kind, name, parent, template)
     function f:GetStringWidth() return #(self.text or "") * 5 end
     function f:SetChecked(v) self.checked = v end
     function f:SetEnabled(value) self.enabled = value end
+    function f:SetNormalFontObject(value) self.normalFont = value end
+    function f:SetHighlightFontObject(value) self.highlightFont = value end
+    function f:SetDisabledFontObject(value) self.disabledFont = value end
     function f:SetAlpha(value) self.alpha = value end
     function f:SetTextColor(...) self.textColor = {...} end
     function f:GetChecked() return self.checked end
@@ -476,17 +491,33 @@ CreateFrame = function(kind, name, parent, template)
     end
     f.TitleText = {SetText = function() end}
     if template == "PortraitFrameTemplate" then
+        f.CloseButton = CreateFrame("Button", nil, f)
         f.NineSlice = CreateFrame("Frame")
         f.TitleContainer = CreateFrame("Frame")
         f.PortraitContainer = CreateFrame("Frame")
         f.Bg = Region()
     end
+    if template == "TabSystemButtonArtTemplate" then
+        f.Text = Region()
+        for _, side in ipairs({"Left", "Middle", "Right"}) do
+            f[side], f[side .. "Active"], f[side .. "Highlight"] = Region(), Region(), Region()
+        end
+        function f:HandleRotation() self.rotationHandled = true end
+        function f:SetTabHeight(value) self.artHeight = value end
+    end
     if template == "GameTooltipTemplate" then
         for _, side in ipairs({"Left", "Right"}) do
-            _G[name .. "Text" .. side .. "1"] = {
+          for line = 1, 2 do
+            _G[name .. "Text" .. side .. line] = {
                 SetFontObject = function(self, font) self.fontObject = font end,
-                SetTextColor = function() end,
+                SetTextColor = function(self, ...) self.textColor = {...} end,
+                ClearAllPoints = function(self) self.point = nil end,
+                SetPoint = function(self, ...) self.point = {...} end,
+                SetJustifyH = function(self, value) self.justify = value end,
+                GetStringWidth = function(self) return #(self.text or "") * 5 end,
+                SetAlpha = function(self, value) self.alpha = value end,
             }
+          end
         end
         function f:SetPoint(...) self.anchor = {...} end
         function f:ClearAllPoints() self.anchor = nil end
@@ -498,6 +529,8 @@ CreateFrame = function(kind, name, parent, template)
         function f:AddLine(text) self.lines[#self.lines + 1] = text end
         function f:AddDoubleLine(left, right)
             self.lines[#self.lines + 1] = left .. right
+            local line = #self.lines
+            if _G[name .. "TextLeft" .. line] then _G[name .. "TextLeft" .. line].text = left end
             self.doubleLines = self.doubleLines or {}
             self.doubleLines[#self.doubleLines + 1] = {left, right}
         end
@@ -658,7 +691,7 @@ combat = false
 
 local shiftHeld, ctrlHeld = true, false
 manager:CloseMenus()
-GameTooltipHeaderText, GameFontHighlightSmall = {}, {}
+GameTooltipHeaderText, GameFontHighlightSmall, GameFontHighlight = {}, {}, {}
 IsShiftKeyDown = function() return shiftHeld end
 IsControlKeyDown = function() return ctrlHeld end
 IsAltKeyDown = function() return false end
@@ -677,15 +710,15 @@ function GameTooltip:Hide() self.shown = false end
 PlayerFrame.scripts.OnEnter(PlayerFrame)
 local shortcutTooltip = AggeHealBotTooltip
 assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "self portrait must show Blizzard's original tooltip alongside the Shift hint")
-assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and shortcutTooltip.ownerAnchor == "ANCHOR_RIGHT", "self portrait must use the shared native-tooltip position and keep addon information beside the frame")
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.")
+assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and shortcutTooltip.ownerAnchor == "ANCHOR_NONE", "self portrait must use the shared native-tooltip position and keep addon information beside the frame")
+assert(shortcutTooltip.shown and table.concat(shortcutTooltip.lines):find("Shift + MiddleAggeHealBot settings", 1, true))
 -- Simulate the stock unit tooltip being rebuilt/faded by Blizzard after hover.
 GameTooltip:SetUnit("player")
 GameTooltip:Hide()
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.", "Blizzard tooltip refresh must not erase or fade the shortcut hint")
+assert(shortcutTooltip.shown and table.concat(shortcutTooltip.lines):find("Shift + MiddleAggeHealBot settings", 1, true), "Blizzard tooltip refresh must not erase or fade the shortcut hint")
 shiftHeld = false
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and shortcutTooltip.lines[2] ~= "Shift + Middle Click to open AggeHealBot Menu.", "releasing Shift must show the full persistent binding tooltip")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines > 2 and not table.concat(shortcutTooltip.lines):find("Shift + MiddleAggeHealBot settings", 1, true), "releasing Shift must show the full persistent binding tooltip")
 assert(GameTooltip.shown and GameTooltip:IsOwned(PlayerFrame), "normal self hover must keep Blizzard's tooltip visible beside addon information")
 local normalTooltipLines = #shortcutTooltip.lines
 GameTooltip:SetOwner(PlayerFrame, "ANCHOR_RIGHT")
@@ -694,10 +727,10 @@ GameTooltip:Hide()
 assert(shortcutTooltip.shown and #shortcutTooltip.lines == normalTooltipLines, "stock tooltip updates must not erase the normal portrait binding tooltip")
 shiftHeld = true
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and #shortcutTooltip.lines == 7 and shortcutTooltip.lines[2] == "Shift + Middle Click to open AggeHealBot Menu.", "holding Shift during hover must update the tooltip without duplicate lines")
+assert(shortcutTooltip.shown and #shortcutTooltip.lines == 7 and table.concat(shortcutTooltip.lines):find("Shift + MiddleAggeHealBot settings", 1, true), "holding Shift during hover must update the tooltip without duplicate lines")
 ctrlHeld = true
 event("MODIFIER_STATE_CHANGED")
-assert(shortcutTooltip.shown and shortcutTooltip.lines[2] ~= "Shift + Middle Click to open AggeHealBot Menu.", "Ctrl-Shift must show the normal persistent tooltip")
+assert(shortcutTooltip.shown and not table.concat(shortcutTooltip.lines):find("Shift + MiddleAggeHealBot settings", 1, true), "Ctrl-Shift must show the normal persistent tooltip")
 ctrlHeld = false
 ns.SetOption("playerFrame", false)
 assert(PlayerFrame.attrs["shift-type1"] == nil and PlayerFrame.attrs["shift-clickbutton1"] == nil)
@@ -723,7 +756,7 @@ for _, frame in ipairs({normalParty, CompactRaidFrame1}) do
     frame.scripts.OnEnter(frame)
     assert(GameTooltip.shown and GameTooltip:IsOwned(frame), "party/raid hover must preserve Blizzard's original unit tooltip")
     assert(AggeHealBotTooltip.shown and AggeHealBotTooltip:IsOwned(frame), "party/raid hover must own the persistent tooltip")
-    assert(AggeHealBotTooltip.ownerAnchor == "ANCHOR_RIGHT" and AggeHealBotTooltip.anchor == nil, "binding panel must remain beside the hovered unit frame, independently of Blizzard's tooltip")
+    assert(AggeHealBotTooltip.ownerAnchor == "ANCHOR_NONE" and AggeHealBotTooltip.anchor[1] == "BOTTOMLEFT" and AggeHealBotTooltip.anchor[4] == 8 and AggeHealBotTooltip.anchor[5] == 8, "binding panel must remain beside the hovered unit frame, independently of Blizzard's tooltip")
     local count = #AggeHealBotTooltip.lines
     assert(count > 2 and AggeHealBotTooltip.doubleLines[1][1] == "Member " .. frame:GetAttribute("unit") and AggeHealBotTooltip.doubleLines[1][2] == "AggeHealBot", "tooltip heading must show the member's name on the left and addon label on the right")
     assert(AggeHealBotTooltipTextLeft1.fontObject == GameTooltipHeaderText and AggeHealBotTooltipTextRight1.fontObject == GameFontHighlightSmall, "member name uses the large header font and addon label uses the small font")
@@ -952,7 +985,7 @@ end
 GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
 targetButton.scripts.OnEnter(targetButton)
 assert(defaultAnchorCalls == 1 and GameTooltip.shown and GameTooltip:IsOwned(targetButton), "target hover must use Blizzard's default tooltip positioning")
-assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and AggeHealBotTooltip.ownerAnchor == "ANCHOR_RIGHT", "native target details and addon bindings must have separate anchors")
+assert(GameTooltip.anchor[1] == "BOTTOMRIGHT" and AggeHealBotTooltip.ownerAnchor == "ANCHOR_NONE", "native target details and addon bindings must have separate anchors")
 event("UNIT_AURA", "target")
 assert(defaultAnchorCalls == 1, "refreshes must preserve the existing native tooltip anchor")
 targetButton.scripts.OnLeave(targetButton)
@@ -1031,7 +1064,7 @@ assert(targetButton.attrs.spell1 == "Revive" and targetButton.regions[2].shown, 
 assert(targetButton.attrs.macrotext1:find("[nocombat,@target,help,dead] Revive", 1, true), "resurrection must use a dead-target condition")
 assert(not targetButton.attrs.macrotext1:find("help,nodead] Revive", 1, true), "resurrection must never be attempted on a living target")
 assert(not targetButton.attrs.macrotext1:find("Rebirth", 1, true))
-local resColor = targetButton.regions[3].color
+local resColor = targetButton.regions[3].vertexColor
 assert(resColor[1] == 0.65 and resColor[3] == 1, "resurrection uses its special pale-blue glow")
 incoming.target = true
 event("INCOMING_RESURRECT_CHANGED", "target")
@@ -1067,7 +1100,7 @@ end
 harmful.target = {{name = "Hex", dispelName = "Curse"}}
 event("UNIT_AURA", "target")
 assert(targetButton.attrs.spell1 == "Remove Curse", "a learned matching cure takes priority over missing buffs")
-assert(targetButton.regions[3].color[1] == 1 and targetButton.regions[3].color[2] == 0.3, "cure watch uses its special red glow")
+assert(targetButton.regions[3].vertexColor[1] == 1 and targetButton.regions[3].vertexColor[2] == 0.3, "cure watch uses its special red glow")
 targetButton.scripts.OnEnter(targetButton)
 local sawDebuff = false
 for _, line in ipairs(AggeHealBotTooltip.lines) do if line == "Hex" then sawDebuff = true end end
@@ -1143,7 +1176,7 @@ event("PLAYER_REGEN_DISABLED")
 assert(not targetButton.regions[2].shown, "disabled combat cure alerts must stay hidden")
 AggeHealBotSettings.combatCures:SetChecked(true)
 AggeHealBotSettings.combatCures.scripts.OnClick(AggeHealBotSettings.combatCures)
-assert(targetButton.regions[2].shown and targetButton.regions[3].color[1] == 1, "combat cure opt-in shows a readable matching cure alert")
+assert(targetButton.regions[2].shown and targetButton.regions[3].vertexColor[1] == 1, "combat cure opt-in shows a readable matching cure alert")
 assert(targetButton.attrs.macrotext1 == combatCureMacro, "combat cure alerts must not change protected cast macros")
 targetButton.scripts.OnEnter(targetButton)
 local sawCombatBinding = false
@@ -1364,7 +1397,7 @@ C_Spell.IsSpellUsable = function() return usable, lowPower end
 C_Spell.GetSpellCooldown = function(id) return id == 61304 and {startTime = 0, duration = 0} or cooldownInfo end
 assert(ns.CastProblem("Regrowth", "target") == nil)
 lowPower = true
-assert(ns.CastProblem("Regrowth", "target") == "Not enough mana / power")
+assert(ns.CastProblem("Regrowth", "target") == "Not enough mana")
 lowPower, usable = false, false
 assert(ns.CastProblem("Regrowth", "target") == "Spell unavailable")
 local mounted = true
@@ -1441,7 +1474,7 @@ assert(targetButton.attrs.spell1 == "Mark", "recovering past the threshold resto
 local beforeMacro = targetButton.attrs.macrotext1
 lowPower = true
 event("SPELL_UPDATE_USABLE")
-assert(targetButton.attrs.macrotext1 == beforeMacro and HasTip("Not enough mana / power"), "availability hints do not change the secure action")
+assert(targetButton.attrs.macrotext1 == beforeMacro and HasTip("Not enough mana"), "availability hints do not change the secure action")
 assert(not targetButton.regions[3].shown, "unavailable buff stops the urgent glow")
 lowPower = false
 event("SPELL_UPDATE_USABLE")
@@ -1503,8 +1536,8 @@ event("UNIT_AURA", "target")
 assert(targetButton.attrs.spell1 == "Cleanse")
 RAID_CLASS_COLORS = {WARRIOR = {r = 0.78, g = 0.61, b = 0.43}}
 ns.ShowOptions()
-assert(AggeHealBotSettings.blessings.shown)
-AggeHealBotSettings.blessings.scripts.OnClick()
+assert(AggeHealBotSettings.nav.paladin.enabled and AggeHealBotSettings.activePage == "home")
+AggeHealBotSettings.nav.paladin.scripts.OnClick()
 assert(AggeHealBotTools.rows[1].class == "WARRIOR")
 AggeHealBotTools.rows[1].dropdown.menuOptions.might.choose()
 assert(ns.GetPaladinRule("WARRIOR") == "might")
@@ -1560,7 +1593,7 @@ ns.SaveBinding("shift-", 1, "default")
 ns.SaveBinding("shift-", 2, "default")
 ns.SaveBinding("shift-", 3, "default")
 event("MODIFIER_STATE_CHANGED")
-assert(HasTip("Shift + Middle Click to open AggeHealBot Menu."))
+assert(HasTip("Shift + MiddleAggeHealBot settings"))
 assert(HasTip("Shift + LeftTarget unit"))
 shiftHeld = false
 
@@ -1581,17 +1614,17 @@ print("PASS: editable Shift-left target and Shift-middle settings defaults on al
 
 -- Blessing choices are real dropdowns, not row clicks or mouse-wheel cycles.
 ns.ShowOptions()
-AggeHealBotSettings.blessings.scripts.OnClick()
+AggeHealBotSettings.nav.paladin.scripts.OnClick()
 assert(AggeHealBotTools.shown and not AggeHealBotSpellPicker.shown)
 local warrior = AggeHealBotTools.rows[1]
 assert(warrior.dropdown.template == "WowStyle1DropdownTemplate" and warrior.scripts.OnClick == nil)
 assert(warrior.icon.texture == "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
 assert(warrior.label.textColor[1] == 0.78 and warrior.label.textColor[2] == 0.61 and warrior.label.textColor[3] == 0.43,
     "class names must use their class color")
-assert(warrior.label.point[2] == 42 and warrior.dropdown.point[2] == 174, "class label and dropdown use separate padded columns")
-assert(AggeHealBotTools.back.point[3] == AggeHealBotTools.defaults.point[3], "footer buttons share one row")
+assert(warrior.label.point[2] == 42 and warrior.dropdown.point[2] == 252, "class label and dropdown use separate padded columns")
+assert(AggeHealBotTools.back == nil and AggeHealBotSettings.blessings == nil, "top tabs replace redundant navigation buttons")
 local paneTop = -AggeHealBotTools.point[3]
-local backBottom = paneTop - AggeHealBotTools.back.point[3] + AggeHealBotTools.back.height
+local backBottom = paneTop - AggeHealBotTools.defaults.point[3] + AggeHealBotTools.defaults.height
 assert(-AggeHealBotSettings.done.point[3] - backBottom >= 24, "Back to bindings has a clear gap above Done")
 local previousRule = ns.GetPaladinRule("WARRIOR")
 warrior.dropdown:GenerateMenu()
@@ -1602,9 +1635,9 @@ assert(ns.GetPaladinRule("WARRIOR") == "wisdom" and warrior.dropdown.selectedTex
 AggeHealBotTools.defaults.scripts.OnClick()
 assert(warrior.dropdown.selectedText == "Auto: Might", "reset refreshes dropdown selection labels")
 warrior.dropdown.menuOpen = true
-AggeHealBotSettings.blessings.scripts.OnClick()
+AggeHealBotSettings.nav.home.scripts.OnClick()
 assert(AggeHealBotSpellPicker.shown and not AggeHealBotTools.shown and not warrior.dropdown.menuOpen,
-    "clicking Paladin blessings again returns to bindings and closes open dropdowns")
+    "Home returns to bindings and closes open dropdowns")
 print("PASS: native blessing dropdown choices, padded class/icon columns, separated footer and pane toggle")
 
 -- Advance binding is optional, support-only, and restricted to this class.
@@ -1793,6 +1826,486 @@ end
 assert(mouse.buttons[1].callout.point[2] + 16 + 26 < mouse.art.point[2]
     and mouse.buttons[2].callout.point[2] + 16 > mouse.art.point[2] + mouse.art.width,
     "spell icons must sit outside both sides of the mouse")
-assert(-AggeHealBotSettings.blessings.point[3] - (-mouse.point[3] + mouse.height) >= 10,
+assert(-AggeHealBotSettings.resetSettings.point[3] - (-mouse.point[3] + mouse.height) >= 10,
     "mouse illustration must leave space before the blessing button")
 print("PASS: five-button mouse hit regions, all modifier combinations, single selection highlight, wheel rebinding, live icons/caption and hover")
+
+-- Target-of-target shares the target feature and addresses targettarget.
+local primaryStateDriver = RegisterStateDriver
+local totFriendly, totExists, totVisibility = true, true
+TargetFrameToT = CreateFrame("Button", "TargetFrameToT", TargetFrame)
+TargetFrameToT:SetAttribute("unit", "targettarget")
+TargetFrameToT:SetAttribute("type1", "target")
+TargetFrameToT:SetAttribute("type2", "togglemenu")
+local function syncToT()
+    if totVisibility ~= "hide" and totFriendly and totExists then ns.targetOfTargetButton:Show()
+    else ns.targetOfTargetButton:Hide() end
+end
+function RegisterStateDriver(frame, key, expression)
+    if frame == ns.targetOfTargetButton then
+        assert(not combat and key == "visibility")
+        totVisibility = expression
+        syncToT()
+    else primaryStateDriver(frame, key, expression) end
+end
+local existsBeforeToT, assistBeforeToT = UnitExists, UnitCanAssist
+UnitExists = function(unit) if unit == "targettarget" then return totExists end; return existsBeforeToT(unit) end
+UnitCanAssist = function(source, unit) if unit == "targettarget" then return totFriendly end; return assistBeforeToT(source, unit) end
+UnitClass = function(unit) return unit == "targettarget" and "Priest" or "Druid", unit == "targettarget" and "PRIEST" or "DRUID" end
+RAID_CLASS_COLORS = {PRIEST = {r = 1, g = 1, b = 1}, DRUID = {r = 1, g = 0.49, b = 0.04}}
+known[8936], spellNames[8936] = "Regrowth", "Regrowth"
+auras.targettarget = {}
+ns.ResetBindings()
+event("PLAYER_LOGIN")
+local tot = ns.targetOfTargetButton
+assert(tot and tot.parent == TargetFrameToT and tot.shown)
+assert(totVisibility == "[@targettarget,exists,help] show; hide")
+assert(tot.attrs.macrotext1:find("@targettarget,help,nodead", 1, true), "ToT heal must address its own unit")
+assert(tot.attrs["shift-macrotext1"] == "/target [@targettarget,exists]")
+manager:CloseMenus()
+tot.scripts.OnEnter(tot)
+assert(AggeHealBotTooltip.owner == tot and AggeHealBotTooltip.lines[1]:find("Member targettarget", 1, true))
+assert(AggeHealBotTooltipTextLeft1.textColor[1] == 1 and AggeHealBotTooltipTextLeft1.textColor[2] == 1,
+    "tooltip heading must use the recipient's priest color")
+mouseEdge(tot, "RightButton", true, "shift-")
+assert(currentMenu and menuUnit == "targettarget" and not AggeHealBotTooltip.shown)
+manager:CloseMenus()
+totFriendly, combat = false, true
+syncToT()
+event("UNIT_TARGET", "target")
+assert(not tot.shown, "hostile ToT retains stock interactions during combat")
+combat, totFriendly = false, true
+syncToT()
+event("UNIT_TARGET", "target")
+tot.scripts.OnEnter(tot)
+assert(AggeHealBotTooltip.shown)
+ns.SetOption("targetFrame", false)
+assert(not tot.shown and not drivers[tot].type1, "target toggle disables ToT clicks and watchers too")
+assert(TargetFrameToT.attrs.type1 == "target" and TargetFrameToT.attrs.type2 == "togglemenu")
+ns.SetOption("targetFrame", true)
+UnitIsPlayer = function(unit) return unit ~= "targettarget" end
+tot.scripts.OnEnter(tot)
+assert(AggeHealBotTooltipTextLeft1.textColor[2] == 0.82, "NPC names keep the default heading color")
+print("PASS: class-colored names, NPC fallback, ToT hover, explicit heals/targeting, secure menus, combat visibility and shared target toggle")
+
+-- Show only client-provided specialization data, without initiating inspect.
+UnitIsPlayer = function() return true end
+NotifyInspect = function() error("hover must not initiate inspection") end
+local inspectedSpec = 257
+C_SpecializationInfo = {
+    GetSpecialization = function(...) assert(select("#", ...) == 0); return 3 end,
+    GetSpecializationInfo = function(index) assert(index == 3); return 105, "Restoration" end,
+    GetInspectSpecialization = function(unit) assert(unit == "targettarget"); return inspectedSpec end,
+}
+GetSpecializationInfoForSpecID = function(id) assert(id == 257); return id, "Holy" end
+tot.scripts.OnEnter(tot)
+assert(HasTip("Holy"), "available inspected specialization belongs below the name")
+inspectedSpec = 0
+now = now + 3601
+tot.scripts.OnEnter(tot)
+assert(not HasTip("Holy"), "missing specialization must clear the prior unit's spec")
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+assert(HasTip("Restoration"), "own specialization uses the local spec API")
+GetSpecializationInfoForSpecID = nil
+GetSpecializationInfoByID = function(id) return id, "Holy" end
+inspectedSpec = 257
+tot.scripts.OnEnter(tot)
+assert(HasTip("Holy"), "older spec-name APIs remain supported")
+local restrictedSpec = {}
+local specSecret = issecretvalue
+issecretvalue = function(value) return value == restrictedSpec or specSecret(value) end
+inspectedSpec = restrictedSpec
+now = now + 3601
+tot.scripts.OnEnter(tot)
+assert(not HasTip("Holy"), "secret spec IDs must not be inspected or compared")
+inspectedSpec = 257
+GetSpecializationInfoByID = function() error("spec unavailable") end
+now = now + 3601
+tot.scripts.OnEnter(tot)
+assert(not HasTip("Holy"), "API denial must not leave stale spec text")
+combat = true
+C_SpecializationInfo.GetInspectSpecialization = function() error("must not query combat spec") end
+tot.scripts.OnEnter(tot)
+assert(not HasTip("Holy"))
+combat = false
+issecretvalue = specSecret
+print("PASS: available self/inspected spec display, legacy lookup, unknown/secret/denied data omission, combat guard and no inspection requests")
+
+-- Forever's generic class-spec label needs real talent data and async inspect.
+local requests, inInspectRange, inspectTreeReady = 0, true, false
+guids.targettarget = "spec-person-A"
+C_SpecializationInfo.GetInspectSpecialization = function() return 0 end
+C_SpecializationInfo.GetSpecializationInfo = function() return 105, "Druid" end
+GetSpecializationInfoByID = nil
+GetNumTalentTabs = function() return 3 end
+GetTalentTabInfo = function(index, inspecting)
+    if inspecting then
+        assert(inspectTreeReady, "inspected trees may only be read after INSPECT_READY for the matching player")
+        return index, ({"Discipline", "Holy", "Shadow"})[index], "", 1, ({0, 17, 0})[index]
+    end
+    return index, ({"Balance", "Feral Combat", "Restoration"})[index], "", 1, ({0, 0, 19})[index]
+end
+assert(ns.GetUnitSpec("player") == "Restoration", "generic Druid label must fall back to the actual leading talent tree")
+CanInspect = function(unit) assert(unit == "targettarget"); return inInspectRange end
+NotifyInspect = function(unit) assert(unit == "targettarget"); requests = requests + 1 end
+tot.scripts.OnEnter(tot)
+assert(requests == 1 and not HasTip("Holy"), "first eligible hover requests data without inventing a spec")
+tot.scripts.OnEnter(tot)
+assert(requests == 1, "repeated hover refreshes must not spam inspect")
+event("INSPECT_READY", "someone-else")
+assert(not HasTip("Holy"), "unrelated inspect results must not supply a spec")
+inspectTreeReady = true
+event("INSPECT_READY", "spec-person-A")
+assert(HasTip("Holy") and AggeHealBotTooltip.doubleLines[2][1] == "Holy"
+    and AggeHealBotTooltip.doubleLines[2][2] == "Priest", "spec precedes class in a horizontal row")
+assert(ns.GetUnitSpec("targettarget") == "Holy" and requests == 1, "confirmed spec is cached per GUID")
+guids.targettarget = "spec-person-B"
+now = now + 3
+inInspectRange = false
+assert(ns.GetUnitSpec("targettarget") == nil and requests == 1, "uninspectable players must not trigger requests or inherit another player's cache")
+inInspectRange = true
+combat = true
+assert(ns.GetUnitSpec("targettarget") == nil and requests == 1, "combat must never issue inspection requests")
+combat = false
+ns.GetUnitSpec("targettarget")
+assert(requests == 2)
+guids.targettarget = "spec-person-C"
+event("INSPECT_READY", "spec-person-B")
+assert(not HasTip("Holy"), "a changed target token must discard a late response for the old player")
+GetTalentTabInfo = function(index) return index, ({"Discipline", "Holy", "Shadow"})[index], "", 1, 5 end
+assert(ns.GetUnitSpec("player") == nil, "tied talent trees must not invent a specialization")
+print("PASS: Forever talent fallback, generic-label rejection, throttled async inspection, GUID caches, stale response rejection, range/combat guards and compact class/spec row")
+
+-- Match the Camelot talent window: tree headers plus group currency, not tabs.
+assert(loadfile("AggeHealBot/UnitDetails.lua"))("AggeHealBot", ns)
+UnitClass = function() return "Druid", "DRUID" end
+C_ClassTalents = {GetActiveConfigID = function() return 12 end}
+Constants = {TraitConsts = {INSPECT_TRAIT_CONFIG_ID = -1}}
+local traitPoints, traitsInspected = {3, 0, 15}, false
+C_Traits = {
+    GetConfigInfo = function(id)
+        assert(id == 12 or id == -1)
+        return {treeIDs = {123}}
+    end,
+    GetGroupDisplayInfoByTreeID = function(id)
+        assert(id == 123)
+        return {{groupID = 1, displayName = "Balance"}, {groupID = 2, displayName = "Feral Combat"}, {groupID = 3, displayName = "Restoration"}}
+    end,
+    GetGroupCurrencyInfo = function(id, groupIDs)
+        assert(id == 12 or traitsInspected, "inspect trait config may only be read after its response")
+        assert(#groupIDs == 3)
+        return {{traitNodeGroupID = 3, currencyInfos = {{spent = traitPoints[3]}}},
+            {traitNodeGroupID = 1, currencyInfos = {{spent = traitPoints[1]}}},
+            {traitNodeGroupID = 2, currencyInfos = {{spent = traitPoints[2]}}}}
+    end,
+}
+assert(ns.GetUnitSpec("player") == "Restoration", "Forever spec must use its actual trait group spend")
+guids.targettarget = "forever-traits-person"
+local requestsBeforeTraits = requests
+tot.scripts.OnEnter(tot)
+assert(requests == requestsBeforeTraits + 1 and not HasTip("Restoration"))
+traitsInspected = true
+event("INSPECT_READY", "forever-traits-person")
+assert(AggeHealBotTooltip.doubleLines[2][1] == "Restoration" and AggeHealBotTooltip.doubleLines[2][2] == "Druid")
+assert(AggeHealBotTooltipTextLeft2.fontObject == GameFontHighlightSmall
+    and AggeHealBotTooltipTextRight2.fontObject == GameFontHighlight, "class is slightly larger than the spec without using the name heading font")
+assert(AggeHealBotTooltipTextRight2.point[2] == AggeHealBotTooltip.ahbInlineSpec
+    and AggeHealBotTooltipTextRight2.point[3] == "BOTTOMRIGHT"
+    and AggeHealBotTooltipTextRight2.point[4] == 4
+    and AggeHealBotTooltipTextRight2.justify == "LEFT", "class sits directly beside the spec rather than at the column edge")
+UnitLevel = function(unit) assert(unit == "targettarget"); return 25 end
+tot.scripts.OnEnter(tot)
+assert(AggeHealBotTooltip.doubleLines[1][1] == "Member targettarget |cffffffff·|r |cffffd100Lv25|r", "gold level follows the name with a white dot and no period")
+assert(AggeHealBotTooltip.ahbHeaderParts.label.text == "Lv" and AggeHealBotTooltip.ahbHeaderParts.value.text == "25",
+    "Lv label and number use separate naturally sized text regions")
+assert(AggeHealBotTooltip.doubleLines[2][1] == "Restoration", "only spec and class remain in the second row")
+UnitLevel = nil
+traitPoints = {5, 0, 5}
+assert(ns.GetUnitSpec("player") == nil, "tied trait groups must not select an arbitrary spec")
+traitPoints = {0, 0, 0}
+assert(ns.GetUnitSpec("player") == nil, "unspent trees must not select an arbitrary spec")
+C_Traits.GetConfigInfo = function() error("traits denied") end
+assert(ns.GetUnitSpec("player") == nil, "denied trait APIs must fail safely")
+print("PASS: Forever native C_Traits self/inspect config, group IDs and spent currencies, compact display, ties/zero points and denied data")
+
+-- The client may return secret tooltip measurements even outside combat.
+local widthReads = 0
+AggeHealBotTooltipTextLeft2.GetStringWidth = function()
+    widthReads = widthReads + 1
+    error("tooltip width is secret")
+end
+C_Traits.GetConfigInfo = function() return {treeIDs = {123}} end
+traitPoints = {3, 0, 15}
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+assert(AggeHealBotTooltip.shown and widthReads == 0)
+assert(AggeHealBotTooltip.ahbInlineSpec.text == "Restoration" and AggeHealBotTooltipTextLeft2.alpha == 0,
+    "inline text must remain visible without measuring or duplicating the native text")
+UnitIsPlayer = function() return false end
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+assert(not AggeHealBotTooltip.ahbInlineSpec.shown and AggeHealBotTooltipTextLeft2.alpha == 1,
+    "reused tooltip regions must restore native text when no inline class/spec row is present")
+print("PASS: tooltip inline class/spec layout never reads secret widths and clears reused text correctly")
+
+-- Buff watcher customization keeps the original defaults until explicitly edited.
+UnitIsPlayer = function() return true end
+UnitClass = function() return "Druid", "DRUID" end
+UnitHealth, UnitHealthMax = function() return 100 end, function() return 100 end
+known[1126], known[467], known[8936] = "Mark", "Thorns", "Regrowth"
+spellNames[1126], spellNames[467], spellNames[8936] = "Mark", "Thorns", "Regrowth"
+C_SpellBook.GetSpellBookItemInfo = function(index) return ({ {spellID = 1126}, {spellID = 467}, {spellID = 8936} })[index] end
+auras.player = {}
+manager:CloseMenus()
+ns.ResetOptions()
+ns.ResetBindings()
+event("PLAYER_LOGIN")
+local watchDefaults = ns.GetBuffWatchList()
+assert(AggeHealBotDB.buffWatch == nil and #watchDefaults == 2
+    and watchDefaults[1].id == 1126 and watchDefaults[2].id == 467
+    and watchDefaults[1].enabled and watchDefaults[2].enabled)
+assert(PlayerFrame.attrs.spell1 == "Mark")
+ns.ShowOptions()
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+local buffUI = AggeHealBotBuffSettings
+assert(buffUI.shown and not AggeHealBotSpellPicker.shown and #buffUI.rows == 2)
+assert(not buffUI.rows[1].up.enabled and not buffUI.rows[2].down.enabled, "priority arrows stop at list boundaries")
+buffUI.rows[1].check:SetChecked(false)
+buffUI.rows[1].check.scripts.OnClick(buffUI.rows[1].check)
+assert(not ns.GetBuffWatchList()[1].enabled and PlayerFrame.attrs.spell1 == "Thorns", "disabled buffs must not take left click")
+buffUI.rows[2].up.scripts.OnClick()
+assert(ns.GetBuffWatchList()[1].id == 467 and buffUI.rows[1].id == 467)
+assert(ns.SetBuffWatchEnabled(1126, true))
+assert(PlayerFrame.attrs.spell1 == "Thorns", "saved order must control which missing buff is offered first")
+event("ADDON_LOADED", "AggeHealBot")
+assert(ns.GetBuffWatchList()[1].id == 467, "existing character choices must survive settings initialization")
+auras.player = {{name = "Thorns"}}
+event("UNIT_AURA", "player")
+assert(PlayerFrame.attrs.spell1 == "Mark", "watcher advances to the next enabled buff")
+assert(ns.buffs.DRUID[1][1] == 1126, "custom ordering must never mutate built-in defaults")
+local beforeCustomCombat = PlayerFrame.attrs.macrotext1
+combat = true
+assert(ns.SetBuffWatchEnabled(1126, false))
+assert(PlayerFrame.attrs.macrotext1 == beforeCustomCombat, "customization must not write protected bindings in combat")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(PlayerFrame.attrs.spell1 == "Regrowth", "deferred changes apply after combat")
+buffUI.defaults.scripts.OnClick()
+assert(AggeHealBotDB.buffWatch == nil and ns.GetBuffWatchList()[1].id == 1126)
+known[467] = nil
+C_SpellBook.GetSpellBookItemInfo = function(index) return ({ {spellID = 1126}, {spellID = 8936} })[index] end
+event("SPELLS_CHANGED")
+buffUI:Render()
+assert(ns.GetBuffWatchList()[2].enabled and not ns.GetBuffWatchList()[2].learned
+    and buffUI.rows[2].note.text == "Not learned yet", "unlearned watchers remain configurable without being cast")
+known[467] = "Thorns"
+assert(not ns.SetBuffWatchEnabled(999999, false) and not ns.MoveBuffWatch(1126, 2))
+ns.SetBuffWatchEnabled(1126, false)
+ns.ResetOptions()
+assert(AggeHealBotDB.buffWatch == nil, "Reset settings restores watcher defaults too")
+AggeHealBotSettings.nav.home.scripts.OnClick()
+assert(not buffUI.shown and AggeHealBotSpellPicker.shown, "buff settings button toggles back to bindings")
+print("PASS: untouched buff defaults, per-character enable/order, UI controls, watcher integration, default restoration and deferred combat changes")
+assert(AggeHealBotSettings.activePage == "home" and AggeHealBotSettings.home.shown
+    and AggeHealBotSettings.nav.home.selected)
+assert(not AggeHealBotSettings.nav.paladin.enabled and AggeHealBotSettings.nav.paladin.locked,
+    "Paladin tab stays greyed out for a druid")
+AggeHealBotSettings.nav.paladin.scripts.OnClick()
+assert(AggeHealBotSettings.activePage == "home", "disabled Paladin navigation cannot switch pages")
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+assert(AggeHealBotSettings.activePage == "buffs" and not AggeHealBotSettings.home.shown
+    and not AggeHealBotSpellPicker.shown and buffUI.shown and AggeHealBotSettings.nav.buffs.selected)
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+assert(AggeHealBotSettings.activePage == "buffs", "clicking the selected tab must keep that page open")
+assert(buffUI.width == 732 and buffUI.point[2] == 24 and AggeHealBotTools.width == 732,
+    "Buffs and Paladin use the full content area")
+assert(-AggeHealBotSettings.home.point[3] - AggeHealBotSettings.buffs.point[3]
+    > -AggeHealBotSettings.nav.home.point[3] + AggeHealBotSettings.nav.home.height,
+    "Home controls must sit below the top navigation")
+AggeHealBotSettings.nav.home.scripts.OnClick()
+assert(AggeHealBotSettings.activePage == "home" and not buffUI.shown and AggeHealBotSpellPicker.shown)
+print("PASS: top Home/Buffs/Paladin navigation, selected state, class restriction, full-page layout and retained Home controls")
+
+-- Closing our editor must not use HideUIPanel's combat-restricted path.
+local oldHidePanel = HideUIPanel
+HideUIPanel = function(frame) assert(not combat, "must not call the stock panel closer in combat"); frame:Hide() end
+for _, page in ipairs({"home", "buffs"}) do
+    ns.ShowOptions()
+    AggeHealBotSettings.nav[page].scripts.OnClick()
+    combat = true
+    AggeHealBotSettings.CloseButton.scripts.OnClick(AggeHealBotSettings.CloseButton)
+    assert(not AggeHealBotSettings.shown and not AggeHealBotBuffSettings.shown,
+        "X must close the editor and its current page during combat")
+    combat = false
+end
+ns.ShowOptions()
+combat = true
+AggeHealBotSettings.done.scripts.OnClick()
+assert(not AggeHealBotSettings.shown, "Done must also close during combat")
+combat = false
+HideUIPanel = oldHidePanel
+
+ns.SetOption("hideRaidControls", false)
+local visibleParent = CompactRaidFrameManager:GetParent()
+ns.SetOption("hideRaidControls", true)
+local hiddenParent = CompactRaidFrameManager:GetParent()
+assert(hiddenParent ~= visibleParent and not hiddenParent:IsShown())
+combat = true
+CompactRaidFrameManager:Show()
+assert(CompactRaidFrameManager:GetParent() == hiddenParent and not hiddenParent:IsShown(),
+    "stock Show during combat must not reveal the controls through the hidden parent")
+ns.SetOption("hideRaidControls", false)
+assert(CompactRaidFrameManager:GetParent() == hiddenParent, "changing the option in combat must defer protected reparenting")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(CompactRaidFrameManager:GetParent() == visibleParent and CompactRaidFrameManager:IsShown(),
+    "turning hiding off restores the original parent after combat")
+print("PASS: X/Done close settings in combat, raid controls survive stock combat Show and restore safely after deferred opt-out")
+
+-- Party members without a spec still need a proper, non-overlapping class row.
+local realUnitSpec = ns.GetUnitSpec
+UnitClass = function(unit) return unit == "party1" and "Priest" or "Druid", unit == "party1" and "PRIEST" or "DRUID" end
+UnitIsPlayer = function() return true end
+UnitLevel = function() return 27 end
+ns.GetUnitSpec = function() return "Discipline" end
+normalParty.scripts.OnEnter(normalParty)
+assert(AggeHealBotTooltip.ahbInlineSpec.shown and AggeHealBotTooltip.ahbInlineSpec.text == "Discipline")
+ns.GetUnitSpec = function() return nil end
+local nativeSetOwner, nativeAnchorKind = GameTooltip.SetOwner, "ANCHOR_RIGHT"
+GameTooltip.SetOwner = function(self, owner, kind)
+    nativeAnchorKind = kind or "ANCHOR_NONE"
+    nativeSetOwner(self, owner, kind)
+end
+GameTooltip.GetAnchorType = function() return nativeAnchorKind end
+GameTooltip:SetOwner(normalParty, "ANCHOR_RIGHT")
+normalParty.scripts.OnEnter(normalParty)
+assert(AggeHealBotTooltip.lines[2] == "Priest" and AggeHealBotTooltipTextLeft2.fontObject == GameFontHighlight,
+    "unknown spec uses a real native class row with its own height")
+assert(AggeHealBotTooltipTextLeft2.alpha == 1 and not AggeHealBotTooltip.ahbInlineSpec.shown,
+    "switching from a known spec must clear the custom inline layout")
+assert(AggeHealBotTooltip.doubleLines[2][1] == "Left", "no empty spec/class columns remain before the bindings")
+assert(nativeAnchorKind == "ANCHOR_NONE" and GameTooltip.anchor[1] == "BOTTOMRIGHT",
+    "party native tooltip must move away from the custom tooltip even when it already owns the frame")
+GameTooltip.SetOwner, GameTooltip.GetAnchorType = nativeSetOwner, nil
+ns.GetUnitSpec, UnitLevel = realUnitSpec, nil
+print("PASS: shared party unknown-spec layout reserves class row height, clears stale inline text and separates the native tooltip")
+
+-- Confirmed specs persist for an hour and are readable without combat queries.
+local wallClock = 1000000
+GetServerTime = function() return wallClock end
+guids.targettarget = "hour-cache-person"
+UnitClass = function(unit) return unit == "player" and "Druid" or "Priest", unit == "player" and "DRUID" or "PRIEST" end
+C_SpecializationInfo.GetSpecialization = function() return 3 end
+C_SpecializationInfo.GetSpecializationInfo = function() return 105, "Restoration" end
+C_SpecializationInfo.GetInspectSpecialization = function() return 257 end
+GetSpecializationInfoForSpecID = function() return 257, "Holy" end
+assert(ns.GetUnitSpec("player") == "Restoration" and ns.GetUnitSpec("targettarget") == "Holy")
+combat = true
+local function noCombatSpecQueries() error("combat must use only the stored spec") end
+C_SpecializationInfo.GetSpecialization = noCombatSpecQueries
+C_SpecializationInfo.GetInspectSpecialization = noCombatSpecQueries
+NotifyInspect = noCombatSpecQueries
+wallClock = wallClock + 3599
+assert(ns.GetUnitSpec("player") == "Restoration" and ns.GetUnitSpec("targettarget") == "Holy")
+assert(loadfile("AggeHealBot/UnitDetails.lua"))("AggeHealBot", ns)
+assert(ns.GetUnitSpec("targettarget") == "Holy", "stored specs survive module/UI reloads")
+guids.targettarget = "different-hour-person"
+assert(ns.GetUnitSpec("targettarget") == nil, "combat cache cannot follow a reused unit token to another player")
+guids.targettarget = "hour-cache-person"
+wallClock = wallClock + 2
+assert(ns.GetUnitSpec("player") == nil and ns.GetUnitSpec("targettarget") == nil, "expired specs must not live beyond an hour")
+combat = false
+print("PASS: one-hour GUID spec cache, self/teammate combat display, reload persistence, expiry and no combat inspection")
+
+local identityBeforeSecret, secrecyBeforeRange = UnitIsUnit, issecretvalue
+local secretIdentity = {}
+issecretvalue = function(value) return value == secretIdentity or secrecyBeforeRange(value) end
+UnitIsUnit = function(first, second)
+    if first == "targettarget" then return secretIdentity end
+    return identityBeforeSecret(first, second)
+end
+ranges.targettarget = false
+ns.SetOption("smartBuffs", false)
+event("UNIT_TARGET", "target")
+assert(tot.attrs.type1 == "none", "secret self-identity must not bypass the actual out-of-range heal check")
+ns.SetOption("smartBuffs", true)
+auras.targettarget = {}
+event("UNIT_AURA", "targettarget")
+assert(not tot.regions[2].shown and tot.attrs.type1 == "none", "secret self-identity must not imply that a missing buff is in range")
+local existsBeforeSecret = UnitExists
+UnitExists = function(unit) if unit == "targettarget" then return secretIdentity end; return existsBeforeSecret(unit) end
+event("UNIT_TARGET", "target")
+assert(not tot.regions[2].shown, "secret existence must suppress the automatic watcher")
+UnitExists, UnitIsUnit, issecretvalue = existsBeforeSecret, identityBeforeSecret, secrecyBeforeRange
+ranges.targettarget = true
+print("PASS: secret unit identity/existence is never tested as a boolean or treated as a self-range shortcut")
+
+-- Cure ordering is opt-in; default debuff order and cure-before-buff stay intact.
+UnitClass = function() return "Druid", "DRUID" end
+UnitIsPlayer = function() return true end
+UnitIsDeadOrGhost = function() return false end
+UnitHealth, UnitHealthMax = function() return 100 end, function() return 100 end
+for id, name in pairs({[1126] = "Mark", [467] = "Thorns", [8936] = "Regrowth", [2782] = "Remove Curse", [2893] = "Abolish Poison", [437138] = "Revive"}) do
+    known[id], spellNames[id] = name, name
+end
+known[88423], known[8946] = nil, nil
+ns.ResetOptions()
+ns.ResetBindings()
+auras.player = {}
+harmful.player = {{name = "Curse test", dispelName = "Curse"}, {name = "Poison test", dispelName = "Poison"}}
+event("PLAYER_LOGIN")
+assert(not AggeHealBotDB.buffsBeforeCures and AggeHealBotDB.cureWatchRules == nil)
+assert(PlayerFrame.attrs.spell1 == "Remove Curse", "unchanged defaults cure the first debuff before missing buffs")
+assert(ns.MoveCureWatch(2893, -1))
+assert(PlayerFrame.attrs.spell1 == "Abolish Poison", "custom cure order must override aura order across debuff types")
+assert(ns.SetCureWatchEnabled(2893, false))
+assert(PlayerFrame.attrs.spell1 == "Remove Curse", "disabled cure must not be selected")
+ns.ShowOptions()
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+assert(#buffUI.cureRows > 0 and buffUI.cureRows[1].point[2] == 380)
+buffUI.defaults.scripts.OnClick()
+assert(PlayerFrame.attrs.spell1 == "Remove Curse" and AggeHealBotDB.cureWatchRules == nil)
+buffUI.order.menuOptions.buffs.choose()
+assert(AggeHealBotDB.buffsBeforeCures and PlayerFrame.attrs.spell1 == "Mark", "Buffs first must select the missing buff ahead of a cure")
+buffUI.order.menuOptions.cures.choose()
+assert(not AggeHealBotDB.buffsBeforeCures and PlayerFrame.attrs.spell1 == "Remove Curse")
+local macroBeforeOrderCombat = PlayerFrame.attrs.macrotext1
+combat = true
+buffUI.order.menuOptions.buffs.choose()
+ns.MoveCureWatch(2893, -1)
+assert(PlayerFrame.attrs.macrotext1 == macroBeforeOrderCombat, "watcher order edits cannot modify protected combat casts")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(PlayerFrame.attrs.spell1 == "Mark", "pending watcher order applies after combat")
+UnitIsDeadOrGhost = function(unit) return unit == "targettarget" end
+UnitHasIncomingResurrection = function() return false end
+event("SPELLS_CHANGED")
+assert(tot.attrs.macrotext1:find("[nocombat,@targettarget,help,dead]", 1, true)
+    and tot.regions[3].vertexColor[1] == 0.65, "resurrection keeps priority over both configurable watcher categories")
+UnitIsDeadOrGhost = function() return false end
+assert(ns.buffs.DRUID[1][1] == 1126 and ns.dispels.DRUID[1][1] == 88423, "custom watcher order cannot mutate shipped lists")
+ns.ResetOptions()
+assert(not AggeHealBotDB.buffsBeforeCures and AggeHealBotDB.cureWatchRules == nil)
+UnitClass = function() return "Priest", "PRIEST" end
+known[988], spellNames[527], spellNames[988] = "Dispel Magic", "Dispel Magic", "Dispel Magic"
+event("PLAYER_LOGIN")
+local dispelRows = 0
+for _, entry in ipairs(ns.GetCureWatchList()) do
+    if entry.name == "Dispel Magic" then dispelRows = dispelRows + 1 end
+end
+assert(dispelRows == 1, "alternate ranks must not duplicate the same cure in settings")
+ns.ShowOptions()
+local homeTab, paladinTab = AggeHealBotSettings.nav.home, AggeHealBotSettings.nav.paladin
+assert(homeTab.template == "TabSystemButtonArtTemplate" and homeTab.isTabOnTop and homeTab.rotationHandled)
+assert(homeTab.LeftActive.shown and not homeTab.Left.shown and homeTab.Text.text:find("Talents-Checkmark-c60", 1, true))
+assert(paladinTab.locked and paladinTab.Text.text:find("Talents-lock-c60", 1, true))
+print("PASS: cure enable/order and rank deduplication, combined watcher priority UI, preserved defaults/resurrection, combat deferral and native talent-style tabs")
+local watchersTab = AggeHealBotSettings.nav.buffs
+watchersTab.scripts.OnEnter(watchersTab)
+assert(watchersTab.LeftHighlight.shown)
+watchersTab.scripts.OnClick()
+assert(watchersTab.LeftActive.shown and not watchersTab.LeftHighlight.shown
+    and not watchersTab.MiddleHighlight.shown and not watchersTab.RightHighlight.shown,
+    "clicking a hovered tab must clear the highlight border before showing its selected border")
+assert(watchersTab.normalFont == GameFontHighlight and watchersTab.highlightFont == GameFontHighlight
+    and watchersTab.disabledFont == GameFontHighlight, "normal/hover/disabled states use identical font metrics")
+assert(watchersTab.height == 26 and watchersTab.artHeight == 26, "tab artwork and hit area must share the compact height")
+assert(buffUI.order.menuOptions.cures.label == "Cures first (default)")

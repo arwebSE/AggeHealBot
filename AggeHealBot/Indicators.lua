@@ -83,44 +83,81 @@ local function CreatePlayerGlow(host, portrait, health, mana, mirrored)
     return glow
 end
 
-local function CreateGlow(host, frame, compact, bounds)
+local function CreateGlow(host, frame, compact)
     local glow = {}
-    -- Animate texture alpha through the client, with no Lua OnUpdate loop.
-    local layers = compact and {{2, 3, 0.10}, {1, 2, 0.24}, {0, 1, 0.9}}
-        or {{4, 5, 0.10}, {2, 3, 0.24}, {0, 1, 0.9}}
-    for _, layer in ipairs(layers) do
-        local spread, width, alpha = layer[1], layer[2], layer[3]
-        for _, side in ipairs({"TOP", "BOTTOM", "LEFT", "RIGHT"}) do
-            local edge = host:CreateTexture(nil, "OVERLAY", nil, 4)
-            if side == "TOP" or side == "BOTTOM" then
-                local y = side == "TOP" and spread or -spread
-                local left = bounds and bounds.left or frame
-                local right = bounds and bounds.right or frame
-                edge:SetPoint(side .. "LEFT", left, side .. "LEFT", -spread, y)
-                edge:SetPoint(side .. "RIGHT", right, side .. "RIGHT", spread, y)
-                edge:SetHeight(width)
-            else
-                local x = side == "LEFT" and -spread or spread
-                local top = bounds and bounds[side == "LEFT" and "left" or "right"] or frame
-                local bottom = top
-                if bounds then
-                    top = bounds[side == "LEFT" and "leftTop" or "rightTop"]
-                    bottom = bounds[side == "LEFT" and "leftBottom" or "rightBottom"]
-                end
-                edge:SetPoint("TOP" .. side, top, "TOP" .. side, x, spread)
-                edge:SetPoint("BOTTOM" .. side, bottom, "BOTTOM" .. side, x, -spread)
-                edge:SetWidth(width)
-            end
-            local pulse = edge:CreateAnimationGroup()
-            pulse:SetLooping("BOUNCE")
-            local animation = pulse:CreateAnimation("Alpha")
-            animation:SetFromAlpha(0.4)
-            animation:SetToAlpha(1)
-            animation:SetDuration(0.9)
-            animation:SetSmoothing("IN_OUT")
-            glow[#glow + 1] = {texture = edge, alpha = alpha, pulse = pulse}
+    local padding = compact and 6 or 8
+    local media = "Interface\\AddOns\\AggeHealBot\\Media\\"
+    local function piece(asset)
+        local texture = host:CreateTexture(nil, "OVERLAY", nil, 4)
+        texture:SetTexture(media .. asset, "CLAMP", "CLAMP", "TRILINEAR")
+        local pulse = texture:CreateAnimationGroup()
+        pulse:SetLooping("BOUNCE")
+        local alpha = pulse:CreateAnimation("Alpha")
+        alpha:SetFromAlpha(0.4)
+        alpha:SetToAlpha(1)
+        alpha:SetDuration(0.9)
+        alpha:SetSmoothing("IN_OUT")
+        glow[#glow + 1] = {texture = texture, alpha = 1, asset = true, pulse = pulse}
+        return texture
+    end
+    -- Eight matching slices form a single softly rounded outline. No solid
+    -- strips overlap at the corners, and native anchors avoid secret geometry.
+    for _, side in ipairs({"TOP", "BOTTOM", "LEFT", "RIGHT"}) do
+        local edge = piece("FrameGlowEdge")
+        if side == "TOP" or side == "BOTTOM" then
+            local y = side == "TOP" and padding or -padding
+            edge:SetPoint(side .. "LEFT", frame, side .. "LEFT", padding, y)
+            edge:SetPoint(side .. "RIGHT", frame, side .. "RIGHT", -padding, y)
+            edge:SetHeight(padding * 2)
+        else
+            local x = side == "LEFT" and -padding or padding
+            edge:SetPoint("TOP" .. side, frame, "TOP" .. side, x, -padding)
+            edge:SetPoint("BOTTOM" .. side, frame, "BOTTOM" .. side, x, padding)
+            edge:SetWidth(padding * 2)
+            edge:SetTexCoord(0, 0, 1, 0, 0, 1, 1, 1)
         end
     end
+    for _, corner in ipairs({"TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT"}) do
+        local edge = piece("FrameGlowCorner")
+        edge:SetSize(padding * 2, padding * 2)
+        edge:SetPoint("CENTER", frame, corner, 0, 0)
+        local right = corner == "TOPRIGHT" or corner == "BOTTOMRIGHT"
+        local bottom = corner == "BOTTOMLEFT" or corner == "BOTTOMRIGHT"
+        edge:SetTexCoord(right and 1 or 0, right and 0 or 1, bottom and 1 or 0, bottom and 0 or 1)
+    end
+    return glow
+end
+local function CreateTargetOfTargetGlow(host)
+    local visual = TargetFrameToT or (TargetFrame and TargetFrame.totFrame)
+    local native = visual and visual.FrameTexture
+    if not native then return end
+    local atlas = native.GetAtlas and native:GetAtlas()
+    if (issecretvalue and issecretvalue(atlas)) or type(atlas) ~= "string" then return end
+    -- Tint copies of the actual Blizzard border art. Its alpha already follows
+    -- the portrait circle and bar corners, unlike the frame's padded rectangle.
+    local overlay = CreateFrame("Frame", nil, host)
+    overlay:SetAllPoints(host)
+    overlay:EnableMouse(false)
+    local glow = {}
+    for _, layer in ipairs({{3, 0.12}, {1.5, 0.22}, {0, 0.65}}) do
+        local texture = overlay:CreateTexture(nil, "OVERLAY", nil, 7)
+        texture:SetAtlas(atlas)
+        texture:SetDesaturated(true)
+        texture:SetBlendMode("ADD")
+        texture:SetPoint("TOPLEFT", native, "TOPLEFT", -layer[1], layer[1])
+        texture:SetPoint("BOTTOMRIGHT", native, "BOTTOMRIGHT", layer[1], -layer[1])
+        glow[#glow + 1] = {texture = texture, alpha = layer[2], asset = true}
+    end
+    local pulse = overlay:CreateAnimationGroup()
+    pulse:SetLooping("BOUNCE")
+    local alpha = pulse:CreateAnimation("Alpha")
+    alpha:SetFromAlpha(0.6)
+    alpha:SetToAlpha(1)
+    alpha:SetDuration(0.9)
+    alpha:SetSmoothing("IN_OUT")
+    glow.pulse = pulse
+    glow.badgeAnchor = visual.HealthBar or visual.healthbar or visual
+    glow.badgePoint, glow.badgeOffsetY = "TOPRIGHT", 14
     return glow
 end
 A.CreateGlow = CreateGlow
@@ -169,7 +206,8 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
         -- to the whole portrait so the pulse frames its name and both bars.
         local isPlayerFrame = frame == PlayerFrame
         local isTargetFrame = frame == A.targetButton
-        local host = (isPlayerFrame or isTargetFrame) and frame
+        local isTargetOfTarget = frame == A.targetOfTargetButton
+        local host = (isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
             or frame.healthBar or frame.healthbar or frame.HealthBar or frame
         view.background = frame:CreateTexture(nil, "OVERLAY", nil, 5)
         view.background:SetColorTexture(0.04, 0.08, 0.04, 0.9)
@@ -191,7 +229,8 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
                 or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar)
             playerMana = TargetFrame.manabar or TargetFrame.manaBar or (content and content.ManaBar)
         end
-        view.glow = playerPortrait and playerHealth and playerMana
+        view.glow = isTargetOfTarget and CreateTargetOfTargetGlow(frame)
+            or playerPortrait and playerHealth and playerMana
             and CreatePlayerGlow(host, playerPortrait, playerHealth, playerMana, isTargetFrame)
             or CreateGlow(host, frame)
         indicators[frame] = view

@@ -22,6 +22,10 @@ local function region()
     function r:ClearAllPoints() self.points = {} end
     function r:SetHeight(height) self.height = height end
     function r:SetTexture(texture) self.texture = texture end
+    function r:SetAtlas(atlas) self.atlas = atlas end
+    function r:GetAtlas() return self.atlas end
+    function r:SetDesaturated(value) self.desaturated = value end
+    function r:SetBlendMode(value) self.blendMode = value end
     function r:SetColorTexture() end
     function r:SetVertexColor() end
     function r:SetAlpha(value) self.alpha = value end
@@ -159,3 +163,50 @@ for _, pieces in ipairs({{arc, middle, cap}, {targetArc, targetMiddle, targetCap
     assert(math.abs(middleBottom - capBottom) < 0.00001, "middle and end cap must join at the same bottom")
 end
 print("PASS: player and mirrored target panels align vertically with offset portrait and health bar geometry")
+
+TargetFrameToT = CreateFrame("Frame")
+TargetFrameToT.FrameTexture = region()
+TargetFrameToT.FrameTexture:SetAtlas("UI-HUD-UnitFrame-TargetofTarget-PortraitOn")
+TargetFrameToT.HealthBar = region()
+TargetFrameToT.FrameTexture.GetWidth = forbiddenCoordinateRead
+TargetFrameToT.FrameTexture.GetHeight = forbiddenCoordinateRead
+A.targetOfTargetButton = CreateFrame("Button", nil, TargetFrameToT)
+A.UpdateBuffIndicator(A.targetOfTargetButton, "Thorns", 467)
+local totOverlay = A.targetOfTargetButton.children[1]
+assert(#totOverlay.textures == 3 and totOverlay.pulse.playing)
+for _, texture in ipairs(totOverlay.textures) do
+    assert(texture.atlas == "UI-HUD-UnitFrame-TargetofTarget-PortraitOn"
+        and texture.desaturated and texture.blendMode == "ADD")
+    assert(texture.points.TOPLEFT.relative == TargetFrameToT.FrameTexture
+        and texture.points.BOTTOMRIGHT.relative == TargetFrameToT.FrameTexture,
+        "mini-frame glow must trace the native portrait-and-bars artwork without reading geometry")
+end
+assert(A.targetOfTargetButton.textures[1].points.TOPLEFT.relative == TargetFrameToT.HealthBar,
+    "buff badge follows the visible bar edge")
+A.UpdateBuffIndicator(A.targetOfTargetButton)
+assert(not totOverlay.pulse.playing and not totOverlay.textures[1].shown)
+print("PASS: target-of-target glow traces native circular portrait/bar artwork, uses fade layers, avoids geometry reads and hides cleanly")
+
+local compactFrame = CreateFrame("Frame")
+local makeTexture = compactFrame.CreateTexture
+function compactFrame:CreateTexture()
+    local texture = makeTexture(self)
+    texture.CreateAnimationGroup = self.CreateAnimationGroup
+    return texture
+end
+compactFrame.GetWidth, compactFrame.GetHeight = forbiddenCoordinateRead, forbiddenCoordinateRead
+local rounded = A.CreateGlow(compactFrame, compactFrame)
+assert(#rounded == 8, "rounded frame glow uses four edges and four non-overlapping corners")
+assert(rounded[1].texture.texture == "Interface\\AddOns\\AggeHealBot\\Media\\FrameGlowEdge")
+assert(rounded[1].texture.points.TOPLEFT.x == 8 and rounded[1].texture.points.TOPRIGHT.x == -8)
+for index = 5, 8 do
+    assert(rounded[index].texture.texture == "Interface\\AddOns\\AggeHealBot\\Media\\FrameGlowCorner")
+    assert(rounded[index].texture.points.CENTER.relative == compactFrame)
+end
+assert(rounded[6].texture.texCoord[1] == 1 and rounded[7].texture.texCoord[3] == 1,
+    "corner masks must mirror into the correct quadrants")
+A.SetGlow(rounded, {1, 0.6, 0.12}, true)
+assert(rounded[1].pulse.playing and rounded[8].texture.shown)
+A.SetGlow(rounded, {1, 0.6, 0.12}, false)
+assert(not rounded[1].pulse.playing and not rounded[8].texture.shown)
+print("PASS: rounded rectangular frame glow uses matching non-overlapping soft masks, native anchors, correct corner orientation and pulse cleanup")
