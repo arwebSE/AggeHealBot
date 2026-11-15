@@ -1077,7 +1077,7 @@ local resColor = targetButton.regions[3].vertexColor
 assert(resColor[1] == 0.65 and resColor[3] == 1, "resurrection uses its special pale-blue glow")
 incoming.target = true
 event("INCOMING_RESURRECT_CHANGED", "target")
-assert(not targetButton.regions[2].shown and not targetButton.attrs.macrotext1:find("help,dead] Revive", 1, true), "incoming resurrection must suppress duplicate offers")
+assert(not targetButton.regions[2].shown and not targetButton.attrs.macrotext1:find("help,dead]", 1, true), "incoming resurrection must suppress duplicate offers")
 incoming.target = false
 ranges.target = false
 event("UNIT_AURA", "target")
@@ -1183,6 +1183,7 @@ local combatCureMacro = targetButton.attrs.macrotext1
 combat = true
 event("PLAYER_REGEN_DISABLED")
 assert(not targetButton.regions[2].shown, "disabled combat cure alerts must stay hidden")
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
 AggeHealBotSettings.combatCures:SetChecked(true)
 AggeHealBotSettings.combatCures.scripts.OnClick(AggeHealBotSettings.combatCures)
 assert(targetButton.regions[2].shown and targetButton.regions[3].vertexColor[1] == 1, "combat cure opt-in shows a readable matching cure alert")
@@ -1632,9 +1633,9 @@ assert(warrior.label.textColor[1] == 0.78 and warrior.label.textColor[2] == 0.61
     "class names must use their class color")
 assert(warrior.label.point[2] == 42 and warrior.dropdown.point[2] == 252, "class label and dropdown use separate padded columns")
 assert(AggeHealBotTools.back == nil and AggeHealBotSettings.blessings == nil, "top tabs replace redundant navigation buttons")
-local paneTop = -AggeHealBotTools.point[3]
-local backBottom = paneTop - AggeHealBotTools.defaults.point[3] + AggeHealBotTools.defaults.height
-assert(-AggeHealBotSettings.done.point[3] - backBottom >= 24, "Back to bindings has a clear gap above Done")
+assert(AggeHealBotTools.defaults.point[1] == "BOTTOMLEFT"
+    and AggeHealBotTools.defaults.point[2] == AggeHealBotSettings
+    and AggeHealBotTools.defaults.point[5] == 13, "blessing reset aligns with the bottom footer")
 local previousRule = ns.GetPaladinRule("WARRIOR")
 warrior.dropdown:GenerateMenu()
 assert(ns.GetPaladinRule("WARRIOR") == previousRule, "opening a dropdown must not change the blessing")
@@ -1835,7 +1836,8 @@ end
 assert(mouse.buttons[1].callout.point[2] + 16 + 26 < mouse.art.point[2]
     and mouse.buttons[2].callout.point[2] + 16 > mouse.art.point[2] + mouse.art.width,
     "spell icons must sit outside both sides of the mouse")
-assert(-AggeHealBotSettings.resetSettings.point[3] - (-mouse.point[3] + mouse.height) >= 10,
+assert(AggeHealBotSettings.height - AggeHealBotSettings.resetSettings.point[5] - AggeHealBotSettings.resetSettings.height
+    - (32 - mouse.point[3] + mouse.height) >= 10,
     "mouse illustration must leave space before the blessing button")
 print("PASS: five-button mouse hit regions, all modifier combinations, single selection highlight, wheel rebinding, live icons/caption and hover")
 
@@ -1889,13 +1891,16 @@ event("UNIT_TARGET", "target")
 tot.scripts.OnEnter(tot)
 assert(AggeHealBotTooltip.shown)
 ns.SetOption("targetFrame", false)
-assert(not tot.shown and not drivers[tot].type1, "target toggle disables ToT clicks and watchers too")
+assert(tot.shown, "target toggle must leave target-of-target enabled")
+ns.SetOption("targetOfTargetFrame", false)
+assert(not tot.shown and not drivers[tot].type1, "independent ToT toggle disables its clicks and watchers")
 assert(TargetFrameToT.attrs.type1 == "target" and TargetFrameToT.attrs.type2 == "togglemenu")
 ns.SetOption("targetFrame", true)
+ns.SetOption("targetOfTargetFrame", true)
 UnitIsPlayer = function(unit) return unit ~= "targettarget" end
 tot.scripts.OnEnter(tot)
 assert(AggeHealBotTooltipTextLeft1.textColor[2] == 0.82, "NPC names keep the default heading color")
-print("PASS: class-colored names, NPC fallback, ToT hover, explicit heals/targeting, secure menus, combat visibility and shared target toggle")
+print("PASS: class-colored names, NPC fallback, ToT hover, explicit heals/targeting, secure menus, combat visibility and independent target toggles")
 
 -- Show only client-provided specialization data, without initiating inspect.
 UnitIsPlayer = function() return true end
@@ -2545,3 +2550,134 @@ assert(settings.home.shown and not settings.advanced.shown)
 ns.ResetOptions()
 assert(AggeHealBotDB.hidePartyControls and AggeHealBotDB.hideRaidControls and AggeHealBotDB.showMinimap)
 print("PASS: Advanced navigation, moved controls, independent default-on party/raid control hiding, group switches and combat deferral")
+
+-- Resurrection controls and debug-only Paladin navigation.
+ns.ShowOptions()
+assert(not settings.nav.paladin.shown and not AggeHealBotDB.showPaladinDebug)
+assert(settings.nav.advanced.point[2] == 348, "hidden Paladin tab must not leave a gap")
+settings.paladinDebug:SetChecked(true)
+settings.paladinDebug.scripts.OnClick(settings.paladinDebug)
+assert(settings.nav.paladin.shown and settings.nav.paladin.enabled)
+settings.nav.paladin.scripts.OnClick()
+assert(settings.activePage == "paladin" and AggeHealBotTools.shown)
+assert(ns.SetPaladinRule("WARRIOR", "kings"), "debug mode permits editing the Paladin rules")
+assert(ns.GetPlayerClass() == "DRUID", "debug UI must never change watcher class")
+ns.SetOption("showPaladinDebug", false)
+settings.scripts.OnEvent()
+assert(not settings.nav.paladin.shown and settings.activePage == "home")
+assert(not ns.SetPaladinRule("WARRIOR", "might"), "other classes cannot edit hidden Paladin rules without debug")
+settings.nav.buffs.scripts.OnClick()
+local resurrectionUI = AggeHealBotBuffSettings
+assert(resurrectionUI.defaults.point[1] == "BOTTOMLEFT" and resurrectionUI.defaults.point[2] == settings
+    and resurrectionUI.defaults.point[5] == 13, "watcher reset button aligns with bottom footer")
+assert(resurrectionUI.resurrection.checked and not resurrectionUI.combatRes.checked)
+focusDead = true
+event("UNIT_FLAGS", "focus")
+assert(focus.attrs.macrotext1:find("help,dead]", 1, true), focus.attrs.macrotext1)
+resurrectionUI.resurrection:SetChecked(false)
+resurrectionUI.resurrection.scripts.OnClick(resurrectionUI.resurrection)
+assert(not AggeHealBotDB.resurrectionWatch and not resurrectionUI.combatRes.enabled)
+assert(not focus.attrs.macrotext1:find("help,dead]", 1, true), "disabled resurrection watcher must stop offering revive")
+ns.SetOption("combatResurrection", true)
+assert(focus.attrs["ahb-resurrection"] ~= "combat" and not focus.attrs.macrotext1:find("dead,party", 1, true))
+resurrectionUI.defaults.scripts.OnClick()
+assert(AggeHealBotDB.resurrectionWatch and not AggeHealBotDB.combatResurrection)
+assert(focus.attrs.macrotext1:find("help,dead]", 1, true))
+local reviveMacro = focus.attrs.macrotext1
+combat = true
+ns.SetOption("resurrectionWatch", false)
+assert(focus.attrs.macrotext1 == reviveMacro, "resurrection setting changes must wait for combat to end")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not focus.attrs.macrotext1:find("help,dead]", 1, true))
+focusDead = false
+ns.ResetOptions()
+print("PASS: resurrection watching toggle, reagent opt-in dependency, watcher reset, bottom footer, combat deferral and hidden/debug Paladin tab")
+
+assert(AggeHealBotDB.targetOfTargetFrame and settings.targetOfTarget.parent == settings.advanced)
+ns.SetOption("targetFrame", false)
+assert(not ns.targetButton.shown and tot.shown)
+ns.SetOption("targetOfTargetFrame", false)
+ns.SetOption("targetFrame", true)
+assert(ns.targetButton.shown and not tot.shown, "target frames can be enabled independently in both directions")
+combat = true
+ns.SetOption("targetOfTargetFrame", true)
+assert(not tot.shown, "ToT enable must be deferred during combat")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(tot.shown)
+settings.nav.buffs.scripts.OnClick()
+assert(settings.combatCures.parent == resurrectionUI and settings.combatCures.point[2] == 530)
+ns.ResetOptions()
+assert(AggeHealBotDB.targetOfTargetFrame and AggeHealBotDB.combatCures)
+AggeHealBotDB.targetOfTargetFrame, AggeHealBotDB.targetFrame = nil, false
+event("ADDON_LOADED", "AggeHealBot")
+assert(AggeHealBotDB.targetOfTargetFrame == false, "upgrade preserves an existing shared target opt-out")
+ns.ResetOptions()
+print("PASS: separate Advanced ToT toggle, independent surfaces, combat deferral, reset/migration and Cure in combat next to cure settings")
+
+-- Advanced reset is scoped; it must not erase Home, watcher or binding choices.
+ns.ShowOptions()
+settings.nav.advanced.scripts.OnClick()
+local savedBindings = AggeHealBotDB.bindings
+ns.SetOption("smartBuffs", false)
+ns.SetOption("showMinimap", false)
+ns.SetOption("targetOnCast", true)
+ns.SetOption("resurrectionWatch", false)
+ns.SetOption("targetOfTargetFrame", false)
+ns.SetOption("hidePartyControls", false)
+ns.SetOption("showPaladinDebug", true)
+settings.advancedReset.scripts.OnClick()
+assert(AggeHealBotDB.targetOfTargetFrame and AggeHealBotDB.hidePartyControls and not AggeHealBotDB.showPaladinDebug)
+assert(not AggeHealBotDB.smartBuffs and not AggeHealBotDB.showMinimap and AggeHealBotDB.targetOnCast
+    and not AggeHealBotDB.resurrectionWatch and AggeHealBotDB.bindings == savedBindings)
+assert(settings.advancedReset.point[1] == "BOTTOMLEFT" and settings.advancedReset.point[5] == 13)
+assert(settings.advancedReset.label.text == "Reset advanced settings" and resurrectionUI.defaults.label.text == "Reset watcher settings")
+ns.ResetOptions()
+print("PASS: scoped Advanced reset preserves bindings, Home and watcher choices, with consistent bottom Reset controls")
+
+-- Resurrection ranks are independent, exact, learned-only and combat-safe.
+;(function()
+local reviveName = ns.GetResurrectionSpell(false)
+for _, id in ipairs({437138, 1237948}) do known[id], spellNames[id] = reviveName, reviveName end
+for _, id in ipairs({20484, 20739}) do known[id], spellNames[id] = "Rebirth", "Rebirth" end
+local rankSubtextBeforeRes = C_Spell.GetSpellSubtext
+C_Spell.GetSpellSubtext = function(id)
+    return ({[437138] = "Rank 1", [1237948] = "Rank 2", [20484] = "Rank 1", [20739] = "Rank 2"})[id] or rankSubtextBeforeRes(id)
+end
+local bookBeforeResRanks = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(index)
+    return ({[8] = {spellID = 437138}, [9] = {spellID = 1237948}, [10] = {spellID = 20484}, [11] = {spellID = 20739}})[index] or bookBeforeResRanks(index)
+end
+C_SpellBook.GetSpellBookSkillLineInfo = function() return {itemIndexOffset = 0, numSpellBookItems = 11} end
+event("SPELLS_CHANGED")
+ns.ShowOptions()
+settings.nav.buffs.scripts.OnClick()
+local normalRank, combatRank = resurrectionUI.resSpells[1].rank, resurrectionUI.resSpells[2].rank
+assert(normalRank.menuOptions.auto.selected() and not combatRank.enabled)
+normalRank.menuOptions[437138].choose()
+assert(ns.GetResurrectionRank(false) == 437138 and ns.GetResurrectionRank(true) == "auto")
+focusDead = true
+event("UNIT_FLAGS", "focus")
+assert(focus.attrs.macrotext1:find(reviveName .. "(Rank 1)", 1, true), "regular resurrection uses the exact selected rank")
+ns.SetOption("combatResurrection", true)
+resurrectionUI:Render()
+assert(combatRank.enabled)
+combatRank.menuOptions[20739].choose()
+assert(focus.attrs.macrotext1:find("Rebirth(Rank 2)", 1, true))
+assert(focus.attrs.macrotext1:find(reviveName .. "(Rank 1)", 1, true), "regular and combat ranks are independent")
+assert(not ns.SetResurrectionRank(false, 20484), "combat spells cannot be chosen as regular resurrection ranks")
+local rankedMacro = focus.attrs.macrotext1
+combat = true
+assert(ns.SetResurrectionRank(true, 20484))
+assert(focus.attrs.macrotext1 == rankedMacro, "rank changes must not rewrite protected combat macros")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(focus.attrs.macrotext1:find("Rebirth(Rank 1)", 1, true))
+assert(ns.GetResurrectionRank(false) == 437138)
+ns.ResetWatchers()
+assert(ns.GetResurrectionRank(false) == "auto" and ns.GetResurrectionRank(true) == "auto")
+assert(not focus.attrs.macrotext1:find("(Rank", 1, true), "Auto returns to name-based highest-rank casts")
+focusDead = false
+print("PASS: separate regular/combat resurrection rank dropdowns, exact secure casts, learned-family validation, combat deferral and Auto reset")
+end)()

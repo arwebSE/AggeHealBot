@@ -163,17 +163,32 @@ local function Value(binding)
     end
     return A.actionLabels[binding.action] or binding.action
 end
+local function CanShowPaladin()
+    return A.GetPlayerClass() == "PALADIN" or AggeHealBotDB.showPaladinDebug
+end
 local function SelectPage(page)
-    if page == "paladin" and A.GetPlayerClass() ~= "PALADIN" then page = "home" end
+    if page == "paladin" and not CanShowPaladin() then page = "home" end
     panel.activePage = page
+    if panel.status then panel.status:SetShown(page ~= "buffs") end
     if panel.home then panel.home:SetShown(page == "home") end
     if panel.advanced then panel.advanced:SetShown(page == "advanced") end
     if picker then picker:SetShown(page == "home") end
     if buffPane then buffPane:SetShown(page == "buffs") end
     if toolsPane then toolsPane:SetShown(page == "paladin") end
     if panel.nav then
-        local paladin = A.GetPlayerClass() == "PALADIN"
+        local paladin = CanShowPaladin()
         panel.nav.paladin:SetLocked(not paladin)
+        local index = 0
+        for _, key in ipairs({"home", "buffs", "paladin", "advanced"}) do
+            local tab = panel.nav[key]
+            local visible = key ~= "paladin" or paladin
+            tab:SetShown(visible)
+            if visible then
+                tab:ClearAllPoints()
+                tab:SetPoint("TOPLEFT", 24 + index * 162, -32)
+                index = index + 1
+            end
+        end
         for key, tab in pairs(panel.nav) do tab:Select(key == page) end
     end
 end
@@ -188,18 +203,21 @@ local function Update()
     if not panel then return end
     panel.buffs:SetChecked(AggeHealBotDB.smartBuffs)
     panel.cures:SetChecked(AggeHealBotDB.cureWatch)
-    panel.combatRes:SetChecked(AggeHealBotDB.combatResurrection)
-    panel.combatCures:SetChecked(AggeHealBotDB.combatCures)
-    panel.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
-    panel.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
+    if panel.combatCures then
+        panel.combatCures:SetChecked(AggeHealBotDB.combatCures)
+        panel.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
+        panel.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
+    end
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
+    panel.targetOfTarget:SetChecked(AggeHealBotDB.targetOfTargetFrame)
     panel.focus:SetChecked(AggeHealBotDB.focusFrame)
     panel.minimap:SetChecked(AggeHealBotDB.showMinimap)
     panel.targetOnCast:SetChecked(AggeHealBotDB.targetOnCast)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     panel.partyControls:SetChecked(AggeHealBotDB.hidePartyControls)
+    panel.paladinDebug:SetChecked(AggeHealBotDB.showPaladinDebug)
     SelectPage(panel.activePage or "home")
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
@@ -334,7 +352,7 @@ local function OpenPicker(button)
             Update()
             picker:Render()
         end
-        Button(picker, "Restore this click", 186, 0, -453, function() Assign("default") end)
+        Button(picker, "Reset this click", 186, 0, -453, function() Assign("default") end)
         Button(picker, "Disable this click", 186, 198, -453, function() Assign("none") end)
         picker:EnableMouseWheel(true)
         picker:SetScript("OnMouseWheel", function(_, delta) Page(-delta) end)
@@ -404,7 +422,7 @@ local function OpenPicker(button)
     Update()
 end
 local function OpenBlessings()
-    if A.GetPlayerClass() ~= "PALADIN" then return end
+    if not CanShowPaladin() then return end
     SelectPage("paladin")
     if picker then picker:Hide() end
     if not toolsPane then
@@ -459,10 +477,12 @@ local function OpenBlessings()
             end)
             toolsPane.rows[i] = row
         end
-        toolsPane.defaults = Button(toolsPane, "Suggested defaults", 186, 0, -410, function()
+        toolsPane.defaults = Button(toolsPane, "Reset blessings", 186, 0, -410, function()
             for _, token in ipairs(A.paladinClasses) do A.SetPaladinRule(token, "auto") end
             toolsPane:Render()
         end)
+        toolsPane.defaults:ClearAllPoints()
+        toolsPane.defaults:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 13)
         toolsPane:SetScript("OnHide", function(self)
             for _, row in ipairs(self.rows) do row.dropdown:CloseMenu() end
         end)
@@ -491,7 +511,7 @@ local function OpenBuffs()
         buffPane = CreateFrame("Frame", "AggeHealBotBuffSettings", panel)
         buffPane:SetSize(732, 451)
         buffPane:SetPoint("TOPLEFT", 24, -78)
-        Text(buffPane, "Buffs & cures", 0, 0)
+        Text(buffPane, "Buffs, cures & resurrection", 0, 0)
         local description = Text(buffPane, "Choose watched spells and their priority. This controls out-of-combat left click; combat cure alerts use your cure order.", 0, -30, "GameFontHighlightSmall")
         description:SetWidth(720)
         description:SetWordWrap(true)
@@ -515,11 +535,67 @@ local function OpenBuffs()
         buffPane.empty = Text(buffPane, "", 0, -148, "GameFontHighlightSmall")
         buffPane.empty:SetWidth(345)
         buffPane.empty:SetWordWrap(true)
-        buffPane.message = Text(buffPane, "", 0, -360, "GameFontHighlightSmall")
+        buffPane.message = Text(buffPane, "", 0, 0, "GameFontHighlightSmall")
+        buffPane.message:ClearAllPoints()
+        buffPane.message:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 58)
         buffPane.message:SetWidth(720)
         buffPane.message:SetWordWrap(true)
-        buffPane.defaults = Button(buffPane, "Restore watcher defaults", 210, 0, -410, function() A.ResetWatchers(); buffPane:Render() end)
-        buffPane:SetScript("OnHide", function(self) self.order:CloseMenu() end)
+        buffPane.defaults = Button(buffPane, "Reset watcher settings", 210, 0, 0, function() A.ResetWatchers(); buffPane:Render() end)
+        buffPane.defaults:ClearAllPoints()
+        buffPane.defaults:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 13)
+        buffPane.resHeading = Text(buffPane, "Resurrection", 0, -365)
+        buffPane.resHeading:SetTextColor(0.65, 0.85, 1)
+        local function ResCheck(key, label, x, description, y)
+            local check = CreateFrame("CheckButton", nil, buffPane, "UICheckButtonTemplate")
+            check:SetSize(26, 26)
+            check:SetPoint("TOPLEFT", x, y or -390)
+            check:SetHitRectInsets(0, -185, 0, 0)
+            local text = Text(check, label, 30, -6, "GameFontHighlightSmall")
+            check:SetScript("OnClick", function(self) A.SetOption(key, self:GetChecked()); Update() end)
+            check:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(label, 1, 0.82, 0)
+                GameTooltip:AddLine(description, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            check:SetScript("OnLeave", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
+            return check
+        end
+        buffPane.combatCures = ResCheck("combatCures", "Cure in combat", 530,
+            "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat. On by default.", -100)
+        buffPane.combatCures:SetHitRectInsets(0, -110, 0, 0)
+        panel.combatCures = buffPane.combatCures
+        buffPane.resurrection = ResCheck("resurrectionWatch", "Resurrection watcher", 0,
+            "Offer a learned reagent-free resurrection on dead friendly players outside combat. Resurrection takes priority over cures and buffs. On by default. Turning this off also disables combat resurrection watching; manual bindings still work.")
+        buffPane.combatRes = ResCheck("combatResurrection", "Combat resurrection", 380,
+            "Include learned combat resurrection spells. These may consume reagents. Requires Resurrection watcher. Off by default.")
+        buffPane.resSpells = {}
+        for index, x in ipairs({0, 380}) do
+            local row = CreateFrame("Frame", nil, buffPane)
+            row:SetSize(352, 78)
+            row:SetPoint("TOPLEFT", x, -430)
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(26, 26)
+            row.icon:SetPoint("TOPLEFT", 4, -3)
+            row.name = Text(row, "", 40, -3, "GameFontHighlightSmall")
+            row.note = Text(row, "", 40, -23, "GameFontHighlightSmall")
+            row.rank = CreateFrame("DropdownButton", nil, row, "WowStyle1DropdownTemplate")
+            row.rank:SetSize(300, 24)
+            row.rank:SetPoint("TOPLEFT", 40, -44)
+            row.rank:SetDefaultText("Auto (highest learned)")
+            row.rank:SetupMenu(function(_, root)
+                for _, choice in ipairs(A.GetResurrectionRankChoices(index == 2)) do
+                    root:CreateRadio(choice.label,
+                        function(value) return A.GetResurrectionRank(index == 2) == value end,
+                        function(value) A.SetResurrectionRank(index == 2, value); buffPane:Render() end, choice.value)
+                end
+            end)
+            buffPane.resSpells[index] = row
+        end
+        buffPane:SetScript("OnHide", function(self)
+            self.order:CloseMenu()
+            for _, row in ipairs(self.resSpells) do row.rank:CloseMenu() end
+        end)
         local function RenderList(kind, rows, x, list)
             for index, entry in ipairs(list) do
                 local row = rows[index]
@@ -534,7 +610,11 @@ local function OpenBuffs()
                     row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
                     row.check:SetSize(26, 26)
                     row.check:SetPoint("LEFT", 0, 0)
-                    row.check:SetScript("OnClick", function(button) A.SetBuffWatchEnabled(row.id, button:GetChecked(), kind); buffPane:Render() end)
+                    row.check:SetScript("OnClick", function(button)
+                        if kind == "cures" and not AggeHealBotDB.cureWatch then return end
+                        A.SetBuffWatchEnabled(row.id, button:GetChecked(), kind)
+                        buffPane:Render()
+                    end)
                     row.icon = row:CreateTexture(nil, "ARTWORK")
                     row.icon:SetSize(26, 26)
                     row.icon:SetPoint("LEFT", 32, 0)
@@ -548,8 +628,12 @@ local function OpenBuffs()
                     rows[index] = row
                 end
                 row.id = entry.id
+                local active = kind ~= "cures" or AggeHealBotDB.cureWatch
+                row:SetAlpha(active and 1 or 0.4)
+                row.check:SetEnabled(active)
                 row.check:SetChecked(entry.enabled)
                 row.icon:SetTexture(entry.icon)
+                row.icon:SetDesaturated(not active)
                 row.icon:SetAlpha(entry.enabled and entry.learned and 1 or 0.4)
                 row.name:SetText(entry.name)
                 local note = not entry.enabled and "Off" or entry.learned and ("Priority " .. index) or "Not learned yet"
@@ -557,21 +641,51 @@ local function OpenBuffs()
                     note = (AggeHealBotDB.cureWatchRules and ("Priority " .. index) or "Default") .. " - " .. (entry.kinds or "")
                 end
                 row.note:SetText(note)
-                row.up:SetAvailable(index > 1)
-                row.down:SetAvailable(index < #list)
+                row.up:SetAvailable(active and index > 1)
+                row.down:SetAvailable(active and index < #list)
                 row:Show()
             end
             for index = #list + 1, #rows do rows[index]:Hide() end
         end
         function buffPane:Render()
+            self.combatCures:SetChecked(AggeHealBotDB.combatCures)
+            self.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
+            self.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
             local buffs, cures = A.GetBuffWatchList(), A.GetCureWatchList()
             RenderList("buffs", self.rows, 0, buffs)
             RenderList("cures", self.cureRows, 380, cures)
+            -- Follow the longer column rather than reserving empty spell rows.
+            local resY = 138 + math.max(#buffs, #cures, 1) * 48 + 22
+            self.resHeading:ClearAllPoints()
+            self.resHeading:SetPoint("TOPLEFT", 0, -resY)
+            for index, check in ipairs({self.resurrection, self.combatRes}) do
+                check:ClearAllPoints()
+                check:SetPoint("TOPLEFT", (index - 1) * 380, -resY - 25)
+                self.resSpells[index]:ClearAllPoints()
+                self.resSpells[index]:SetPoint("TOPLEFT", (index - 1) * 380, -resY - 62)
+            end
             self.order:GenerateMenu()
             self.buffHeading:SetText(AggeHealBotDB.smartBuffs and "Buffs" or "Buffs (off)")
             self.cureHeading:SetText(AggeHealBotDB.cureWatch and "Cures" or "Cures (off)")
+            self.cureHeading:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.4)
             self.empty:SetText(#buffs > 0 and "" or A.GetPlayerClass() == "PALADIN" and "Choose the blessing for each class in the Paladin tab." or "This class has no automatic buff-watch list.")
-            self.message:SetText(InCombatLockdown() and "Saved. Changes apply after combat." or "Resurrection stays first. Cure defaults follow debuff order until customized. Unlearned spells activate when trained; choices save for this character.")
+            self.resurrection:SetChecked(AggeHealBotDB.resurrectionWatch)
+            self.combatRes:SetChecked(AggeHealBotDB.combatResurrection)
+            self.combatRes:SetEnabled(AggeHealBotDB.resurrectionWatch)
+            self.combatRes:SetAlpha(AggeHealBotDB.resurrectionWatch and 1 or 0.45)
+            for index, row in ipairs(self.resSpells) do
+                local name, icon, learned = A.GetResurrectionSpell(index == 2)
+                row:SetShown(name ~= nil)
+                row.icon:SetTexture(icon)
+                row.icon:SetAlpha(learned and 1 or 0.4)
+                row.name:SetText(name or "")
+                row.note:SetText(not learned and "Not learned yet" or index == 2 and "May use reagents" or "Outside combat; no reagents")
+                local enabled = name ~= nil and AggeHealBotDB.resurrectionWatch and (index == 1 or AggeHealBotDB.combatResurrection)
+                row.rank:SetEnabled(enabled)
+                row.rank:SetAlpha(enabled and 1 or 0.45)
+                row.rank:GenerateMenu()
+            end
+            self.message:SetText(InCombatLockdown() and "Saved. Changes apply after combat." or "Resurrection stays first. Cure defaults follow debuff order until customized. Unlearned spells activate when trained.")
         end
     end
     buffPane:Render()
@@ -661,7 +775,15 @@ function A.ShowOptions(host)
         panel.advanced:SetPoint("TOPLEFT", 0, -32)
         Text(panel.advanced, "Frames", 24, -45)
         Text(panel.advanced, "Choose which Blizzard frames use your click bindings and watchers.", 24, -72, "GameFontHighlightSmall")
-        Text(panel.advanced, "Blizzard controls", 24, -215)
+        Text(panel.advanced, "Interaction", 24, -196)
+        Text(panel.advanced, "Blizzard controls", 24, -286)
+        Text(panel.advanced, "Debug", 24, -376)
+        panel.advancedReset = Button(panel.advanced, "Reset advanced settings", 210, 0, 0, function()
+            A.ResetAdvancedOptions()
+            Update()
+        end)
+        panel.advancedReset:ClearAllPoints()
+        panel.advancedReset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 13)
         panel.nav = {}
         for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}, {"advanced", "Advanced"}}) do
             local key = entry[1]
@@ -707,33 +829,33 @@ function A.ShowOptions(host)
         end
         panel.buffs = Check("smartBuffs", "Buff watcher", 18, -37,
             "Prioritize missing class buffs and known rank upgrades on plain left-click outside combat. Below 90% health, your assigned heal takes priority over buffs. The icon and glow show the next buff; an unavailable spell is dimmed.")
-        panel.cures = Check("cureWatch", "Cure watcher", 18, -65,
+        panel.cures = Check("cureWatch", "Cure watcher", 182, -37,
             "Prioritize a learned cure on plain left-click when a removable debuff is present. Runs outside combat while aura data is readable.")
-        panel.combatRes = Check("combatResurrection", "Combat resurrection", 182, -37,
-            "Include learned combat resurrection spells, such as Rebirth, in left-click priority for dead party or raid members. These spells may consume reagents. Off by default.")
-        panel.player = Check("playerFrame", "Player frame", 18, -100,
+        panel.player = Check("playerFrame", "Player frame", 18, -96,
             "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed on Home.", false, panel.advanced)
-        panel.target = Check("targetFrame", "Target frame", 260, -100,
-            "Enable click healing, hover tooltips and watch indicators on the stock friendly target and target-of-target frames. All bindings can be changed on Home.", false, panel.advanced)
-        panel.focus = Check("focusFrame", "Focus frame", 18, -140,
+        panel.target = Check("targetFrame", "Target frame", 398, -96,
+            "Enable click healing, hover tooltips and watch indicators on the stock friendly target frame. Target of target has its own setting. All bindings can be changed on Home.", false, panel.advanced)
+        panel.targetOfTarget = Check("targetOfTargetFrame", "Target of target", 398, -132,
+            "Enable click healing, unit menus, hover tooltips and player-only watchers on the friendly target-of-target frame, independently of Target frame. On by default.", false, panel.advanced)
+        panel.focus = Check("focusFrame", "Focus frame", 18, -132,
             "Enable the same click bindings, hover tooltip and player-only watchers on your friendly focus frame. Enemy focus interactions stay unchanged. On by default.", false, panel.advanced)
-        panel.targetOnCast = Check("targetOnCast", "Target on cast", 182, -93,
+        panel.targetOnCast = Check("targetOnCast", "Target on cast", 182, -73,
             "Select the friendly unit you click when using a spell binding, including buff, cure and resurrection clicks. Off by default. This changes your current target; failed casts in combat can still select the clicked unit.")
-        panel.minimap = Check("showMinimap", "Minimap icon", 18, -93,
+        panel.minimap = Check("showMinimap", "Minimap icon", 18, -73,
             "Show AggeHealBot's spellbook icon beside the minimap for quick access to settings. Drag it around the minimap to move it. On by default.")
-        panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 260, -140,
+        panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -222,
             "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true, panel.advanced)
-        panel.raidControls = Check("hideRaidControls", "Hide raid controls", 260, -245,
+        panel.raidControls = Check("hideRaidControls", "Hide raid controls", 398, -312,
             "Hide Blizzard's group-control side panel and tab while in a raid. Raid unit frames stay visible. On by default.", false, panel.advanced)
-        panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -245,
+        panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -312,
             "Hide Blizzard's group-control side panel and tab while outside a raid, including raid-style party frames. Party unit frames stay visible. On by default.", false, panel.advanced)
-        panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,
-            "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat because combat bindings cannot change based on debuffs. On by default.")
-        Text(panel.home, "MODIFIERS", 24, -136, "GameFontHighlightSmall")
+        panel.paladinDebug = Check("showPaladinDebug", "Show Paladin tab (debug)", 18, -402,
+            "Show and allow editing the Paladin settings tab on other classes for testing. This does not grant paladin spells or enable paladin buff watching on another class. Off by default.", false, panel.advanced)
+        Text(panel.home, "MODIFIERS", 24, -120, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -158 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -142 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
@@ -745,20 +867,26 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
-        panel.mouse:SetPoint("TOPLEFT", 24, -266)
+        panel.mouse:SetPoint("TOPLEFT", 24, -250)
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}
         end
-        Button(panel.home, "Reset all bindings", 155, 24, -resetY, function()
+        panel.resetBindings = Button(panel.home, "Reset all bindings", 155, 0, 0, function()
             A.ResetBindings()
             OpenPicker(selectedButton)
         end)
-        panel.resetSettings = Button(panel.home, "Reset settings", 155, 184, -resetY, function()
+        panel.resetBindings:ClearAllPoints()
+        panel.resetBindings:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 13)
+        panel.resetSettings = Button(panel.home, "Reset settings", 155, 0, 0, function()
             A.ResetOptions()
             Update()
         end)
+        panel.resetSettings:ClearAllPoints()
+        panel.resetSettings:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 184, 13)
         panel.status = Text(panel, "", 24, -resetY - 66, "GameFontHighlightSmall")
+        panel.status:ClearAllPoints()
+        panel.status:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 58)
         panel.done = Button(panel, "Done", 100, 655, -resetY - 58, A.CloseOptions)
         panel:SetScript("OnHide", function() if picker then picker:Hide() end; if toolsPane then toolsPane:Hide() end; if buffPane then buffPane:Hide() end end)
         for _, event in ipairs({"PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "SPELLS_CHANGED"}) do panel:RegisterEvent(event) end

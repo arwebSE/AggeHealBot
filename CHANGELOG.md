@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 — 2026-11-15
+
+- Add separate learned-rank dropdowns for regular and combat resurrection. Default each to Auto (highest learned), save exact ranks per character, reset them with watcher settings and defer protected changes until after combat.
+- Grey out and disable cure spell checkboxes and priority arrows while Cure watcher is off, preserving saved choices.
+- Tighten Watchers by positioning resurrection below the longer spell list and keeping its help and reset controls near the footer. Align Advanced into two columns with consistent section gaps and add a scoped Reset advanced settings button. Use Reset consistently on watcher, binding and blessing buttons.
+- Give Target of target an independent default-on checkbox in Advanced, preserving an existing shared target opt-out when upgrading. Move Cure in combat beside Cures in Watchers.
+- Add Resurrection watcher controls to Watchers, including a default-on master toggle, default-off combat resurrection, spell details and reagent notes. Keep resurrection first and restore these options with watcher defaults.
+- Anchor Home, Watchers, Paladin and Advanced reset buttons to the bottom beside Done, with status text above the footer.
+- Hide Paladin on other classes and close the tab gap. Add a default-off Show Paladin tab (debug) option in Advanced for viewing and editing those settings without enabling paladin watching on another class.
+
 ## 1.1.0 — 2026-11-15
 
 - Let standalone settings come to the front when opened or clicked, so focus can switch naturally between AggeHealBot and AggeMinimap without interleaving their controls.

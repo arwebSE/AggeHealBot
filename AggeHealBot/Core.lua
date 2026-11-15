@@ -15,7 +15,8 @@ local hoverHooks = {}
 local targetVisibilityDrivers = {}
 local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
-    combatResurrection = false, playerFrame = true, targetFrame = true, focusFrame = true,
+    combatResurrection = false, resurrectionWatch = true, showPaladinDebug = false,
+    playerFrame = true, targetFrame = true, targetOfTargetFrame = true, focusFrame = true,
     rightClickMenu = false, hideRaidControls = true, hidePartyControls = true,
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
@@ -113,6 +114,18 @@ local function IsLearned(name, spellID, exactRank)
         if spellName == name and IsPlayerSpell and IsPlayerSpell(id) then return true end
     end
     return false
+end
+local function ResurrectionSpell(inCombat)
+    local ids = (inCombat and A.combatResurrections or A.resurrections)[class] or {}
+    local saved = AggeHealBotDB.resurrectionRanks
+    local choice = saved and saved.class == class and saved[inCombat and "combat" or "normal"]
+    if choice then
+        local name = SpellName(choice.id)
+        if name and IsLearned(name, choice.id, true) then return name .. "(" .. choice.rank .. ")", choice.id end
+        return nil, choice.id
+    end
+    local name = Resolve(ids)
+    return name, name and spellDetails[name] and spellDetails[name].id or ids[1]
 end
 local function BuildBindings()
     ReadSpellbook()
@@ -797,10 +810,10 @@ Apply = function(frame)
     frames[frame].healingFirst = frames[frame].canHealFirst and A.NeedsHealing(unit) or false
     if watches and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit) end
     frames[frame].unitDead = ReadFlag(UnitIsDeadOrGhost, unit)
-    local normalResIDs = A.resurrections[class] or {}
-    local combatResIDs = A.combatResurrections[class] or {}
-    local normalRes = watches and Resolve(normalResIDs) or nil
-    local combatRes = watches and AggeHealBotDB.combatResurrection and Resolve(combatResIDs) or nil
+    local normalRes, normalResID = ResurrectionSpell(false)
+    local combatRes, combatResID = ResurrectionSpell(true)
+    if not watches or not AggeHealBotDB.resurrectionWatch then normalRes, combatRes = nil, nil end
+    if not AggeHealBotDB.combatResurrection then combatRes = nil end
     local res = ResurrectionCandidate(unit, normalRes or combatRes)
     local cure, cureID, debuff
     if watches and not res then cure, cureID, debuff = CureCandidate(unit) end
@@ -808,8 +821,8 @@ Apply = function(frame)
     else cure, debuff = nil, nil end
     frames[frame].cure = cure and (debuff or "Removable debuff") or nil
     frames[frame].resurrection = res ~= nil
-    if res then buff, buffID = res, normalRes and normalResIDs[1] or combatResIDs[1] end
-    frames[frame].combatResSpell, frames[frame].combatResID = combatRes, combatResIDs[1]
+    if res then buff, buffID = res, normalRes and normalResID or combatResID end
+    frames[frame].combatResSpell, frames[frame].combatResID = combatRes, combatResID
     if combatRes and unit and unit ~= "player" then
         RegisterAttributeDriver(frame, "ahb-resurrection", "[@" .. unit .. ",combat,help,dead,party] combat; [@" .. unit .. ",combat,help,dead,raid] combat; none")
     else
@@ -868,7 +881,9 @@ Apply = function(frame)
 end
 local function Register(frame)
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
-    if TargetUnit(frame) and not AggeHealBotDB[frame == A.focusButton and "focusFrame" or "targetFrame"] then return end
+    local option = frame == A.focusButton and "focusFrame"
+        or frame == A.targetOfTargetButton and "targetOfTargetFrame" or "targetFrame"
+    if TargetUnit(frame) and not AggeHealBotDB[option] then return end
     if Eligible(frame) and not InCombatLockdown() then Apply(frame) end
 end
 local function HookFunctions()
@@ -942,7 +957,7 @@ discover = function()
     HookFunctions()
     Register(PlayerFrame)
     RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
-    RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton")
+    RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton", "targetOfTargetFrame")
     RegisterTargetSurface(FocusFrame, "focusButton", "focus", "AggeHealBotFocusButton", "focusFrame")
     for i = 1, 5 do
         Register(_G["PartyMemberFrame" .. i])
@@ -1085,7 +1100,55 @@ end
 function A.ResetWatchers()
     AggeHealBotDB.buffWatch, AggeHealBotDB.cureWatchRules = nil, nil
     AggeHealBotDB.buffsBeforeCures = false
+    AggeHealBotDB.resurrectionWatch, AggeHealBotDB.combatResurrection = true, false
+    AggeHealBotDB.resurrectionRanks = nil
     Queue()
+end
+function A.GetResurrectionSpell(inCombat)
+    local ids = (inCombat and A.combatResurrections or A.resurrections)[class] or {}
+    local name, id = ResurrectionSpell(inCombat)
+    local label = (id and SpellName(id)) or CandidateName(ids)
+    local info = id and C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+    return label, info and info.iconID or 134400, name ~= nil
+end
+function A.GetResurrectionRankChoices(inCombat)
+    local ids = (inCombat and A.combatResurrections or A.resurrections)[class] or {}
+    local families, candidates, seen = {}, {}, {}
+    for _, id in ipairs(ids) do
+        local name = SpellName(id)
+        if name then families[name] = true end
+        candidates[#candidates + 1] = id
+    end
+    for id, entry in pairs(spellRanks) do if families[entry.name] then candidates[#candidates + 1] = id end end
+    local choices = {}
+    for _, id in ipairs(candidates) do
+        local entry = spellRanks[id]
+        local rank = entry and entry.rank or SpellRank(id)
+        if not seen[id] and rank and IsLearned(SpellName(id), id, true) then
+            choices[#choices + 1] = {value = id, label = rank, rank = rank}
+            seen[id] = true
+        end
+    end
+    table.sort(choices, function(a, b) return tonumber(a.rank:match("%d+")) < tonumber(b.rank:match("%d+")) end)
+    table.insert(choices, 1, {value = "auto", label = "Auto (highest learned)"})
+    return choices
+end
+function A.GetResurrectionRank(inCombat)
+    local saved = AggeHealBotDB.resurrectionRanks
+    local choice = saved and saved.class == class and saved[inCombat and "combat" or "normal"]
+    return choice and choice.id or "auto"
+end
+function A.SetResurrectionRank(inCombat, value)
+    local selected
+    for _, choice in ipairs(A.GetResurrectionRankChoices(inCombat)) do
+        if choice.value == value then selected = choice; break end
+    end
+    if not selected then return false end
+    local saved = AggeHealBotDB.resurrectionRanks
+    if not saved or saved.class ~= class then saved = {class = class}; AggeHealBotDB.resurrectionRanks = saved end
+    saved[inCombat and "combat" or "normal"] = value ~= "auto" and {id = value, rank = selected.rank} or nil
+    Queue()
+    return true
 end
 local function Passive(id, detail)
     if detail and detail.passive then return true end
@@ -1200,7 +1263,16 @@ A.ResetOptions = function()
     AggeHealBotDB.paladinBlessings = nil
     AggeHealBotDB.buffWatch = nil
     AggeHealBotDB.cureWatchRules = nil
+    AggeHealBotDB.resurrectionRanks = nil
     if A.UpdateMinimap then A.UpdateMinimap() end
+    Queue()
+    if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
+end
+function A.ResetAdvancedOptions()
+    for _, key in ipairs({"playerFrame", "targetFrame", "targetOfTargetFrame", "focusFrame",
+        "rightClickMenu", "hidePartyControls", "hideRaidControls", "showPaladinDebug"}) do
+        AggeHealBotDB[key] = optionDefaults[key]
+    end
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end
@@ -1209,7 +1281,7 @@ A.GetPaladinRule = function(targetClass)
     return (rule == "off" or A.paladinBlessings[rule]) and rule or "auto"
 end
 A.SetPaladinRule = function(targetClass, rule)
-    if class ~= "PALADIN" or (rule ~= "auto" and rule ~= "off" and not A.paladinBlessings[rule]) then return false end
+    if (class ~= "PALADIN" and not AggeHealBotDB.showPaladinDebug) or (rule ~= "auto" and rule ~= "off" and not A.paladinBlessings[rule]) then return false end
     local valid
     for _, token in ipairs(A.paladinClasses) do if token == targetClass then valid = true end end
     if not valid then return false end
@@ -1245,6 +1317,10 @@ end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
     if event == "ADDON_LOADED" and arg == ADDON then
         AggeHealBotDB = AggeHealBotDB or {}
+        -- Preserve the previous shared opt-out when upgrading saved settings.
+        if AggeHealBotDB.targetOfTargetFrame == nil and AggeHealBotDB.targetFrame ~= nil then
+            AggeHealBotDB.targetOfTargetFrame = AggeHealBotDB.targetFrame
+        end
         for key, value in pairs(optionDefaults) do
             if AggeHealBotDB[key] == nil then AggeHealBotDB[key] = value end
         end
