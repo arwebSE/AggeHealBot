@@ -1,5 +1,13 @@
 package-as: AggeHealBot
 
+enable-nolib-creation: no
+
+tools-used:
+    - libstub
+    - callbackhandler
+    - libdatabroker-1-1
+    - libdbicon-1-0
+
 move-folders:
     AggeHealBot/AggeHealBot: AggeHealBot
 

@@ -92,7 +92,7 @@ The **Cure in combat** toggle beside the Cures settings in Watchers enables comb
 
 ## Casting behavior
 
-**Minimap icon** on Home adds our spellbook icon for quick access to settings. It is on by default. Click to open or close settings, and drag around the minimap to save its position.
+**Minimap icon** on Home adds our spellbook icon for quick access to settings. It uses bundled LibDBIcon and LibDataBroker so standard minimap collectors can recognize it; no separate library installation is needed. It is on by default. Click to open or close settings, and drag around the minimap to save its position.
 
 **Target on cast**, also on Home and off by default, selects the friendly unit you click when using a spell binding, including watcher casts. It changes your current target. Known out-of-range casts blocked by the addon do not target; a cast rejected by the game in combat can still select the unit. Changes to casting behavior made during combat apply after combat.
 

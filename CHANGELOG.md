@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 — 2026-11-16
+
+- Replace the custom minimap button with LibDBIcon and a LibDataBroker launcher. Bundle required libraries, keep the addon icon and visibility setting, migrate the saved drag position and register the button for minimap collectors.
+
 ## 1.1.1 — 2026-11-15
 
 - Add separate learned-rank dropdowns for regular and combat resurrection. Default each to Auto (highest learned), save exact ranks per character, reset them with watcher settings and defer protected changes until after combat.

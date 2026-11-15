@@ -2465,39 +2465,84 @@ assert(not focus.attrs.macrotext2:find("\n/target", 1, true))
 assert(cvars.autoSelfCast == "1", "new casting option must not change Auto Self Cast")
 print("PASS: optional rank enumeration, Auto/rank sorting, saved exact-rank casts, hidden-picker persistence and deferred target-on-cast without global CVar changes")
 
--- Exercise the standalone minimap button with its real click and drag callbacks.
+-- Load the bundled libraries and exercise their real registration/click/drag path.
 local createBeforeMinimap = CreateFrame
 CreateFrame = function(...)
     local f = createBeforeMinimap(...)
     function f:SetHighlightTexture(texture) self.highlightTexture = texture end
+    function f:SetFixedFrameStrata() end
+    function f:SetFixedFrameLevel() end
+    function f:LockHighlight() end
+    function f:UnlockHighlight() end
+    function f:GetCenter() return 100, 100 end
+    function f:CreateAnimationGroup()
+        local group = Region():CreateAnimationGroup()
+        local createAnimation = group.CreateAnimation
+        function group:CreateAnimation(kind)
+            local animation = createAnimation(self, kind)
+            function animation:SetOrder() end
+            function animation:SetStartDelay() end
+            return animation
+        end
+        function group:SetToFinalAlpha() end
+        return group
+    end
+    local createTexture = f.CreateTexture
+    function f:CreateTexture(...)
+        local texture = createTexture(self, ...)
+        function texture:GetParent() return f end
+        function texture:GetVertexColor() return 1, 1, 1 end
+        return texture
+    end
     return f
 end
 Minimap = CreateFrame("Frame", "Minimap")
+UIParent = UIParent or CreateFrame("Frame", "UIParent")
+UIParent:Show()
 Minimap:SetSize(160, 160)
 function Minimap:GetCenter() return 100, 100 end
 function Minimap:GetEffectiveScale() return 1 end
 GetCursorPosition = function() return 200, 100 end
+math.atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+strmatch = string.match
+securecallfunction = function(fn, ...) return fn(...) end
+assert(loadfile("AggeHealBot/Libs/LibStub/LibStub.lua"))()
+assert(loadfile("AggeHealBot/Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua"))()
+assert(loadfile("AggeHealBot/Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua"))()
+assert(loadfile("AggeHealBot/Libs/LibDBIcon-1.0/LibDBIcon-1.0.lua"))()
+AggeHealBotDB.minimapAngle = 90
 assert(loadfile("AggeHealBot/Minimap.lua"))("AggeHealBot", ns)
+assert(AggeHealBotDB.minimap.minimapPos == 90 and AggeHealBotDB.minimapAngle == nil, "old position migrates to LibDBIcon")
+assert(LibStub("LibDBIcon-1.0"):IsRegistered("AggeHealBot"))
+assert(LibStub("LibDataBroker-1.1"):GetDataObjectByName("AggeHealBot").type == "launcher")
 assert(ns.minimapButton and ns.minimapButton.shown, "minimap icon is on by default")
 ns.SetOption("showMinimap", false)
-assert(not ns.minimapButton.shown)
+assert(not ns.minimapButton.shown and AggeHealBotDB.minimap.hide)
 ns.SetOption("showMinimap", true)
 local mini = ns.minimapButton
-assert(mini and mini.shown and mini.regions[1].texture == "Interface\\AddOns\\AggeHealBot\\Media\\Icon")
+assert(mini and mini.shown and mini.icon.texture == "Interface\\AddOns\\AggeHealBot\\Media\\Icon")
 local toggles, toggleBefore = 0, ns.ToggleOptions
 ns.ToggleOptions = function() toggles = toggles + 1 end
-mini.scripts.OnClick(mini)
+mini.scripts.OnClick(mini, "LeftButton")
 assert(toggles == 1)
 mini.scripts.OnDragStart(mini)
 assert(mini.scripts.OnUpdate)
 mini.scripts.OnUpdate(mini)
 mini.scripts.OnDragStop(mini)
-assert(AggeHealBotDB.minimapAngle == 0 and not mini.scripts.OnUpdate)
-assert(mini.point[4] == 88 and mini.point[5] == 0)
+assert(AggeHealBotDB.minimap.minimapPos == 0 and not mini.scripts.OnUpdate)
+assert(mini.point[4] == 85 and mini.point[5] == 0)
+ns.UpdateMinimap()
+assert(ns.minimapButton == mini and mini.db == AggeHealBotDB.minimap, "refresh must not create duplicate registrations")
+mini.scripts.OnClick(mini, "RightButton")
+assert(toggles == 2, "both minimap clicks toggle settings through the broker")
+mini.scripts.OnEnter(mini)
+assert(LibStub("LibDBIcon-1.0").tooltip.shown)
+mini.scripts.OnLeave(mini)
+assert(not LibStub("LibDBIcon-1.0").tooltip.shown)
 ns.ResetOptions()
 assert(mini.shown and not mini.scripts.OnUpdate)
 ns.ToggleOptions = toggleBefore
-print("PASS: minimap default-on, optional hiding, addon artwork, settings click, saved drag position and reset cleanup")
+print("PASS: bundled LibDBIcon/LDB registration, default-on, optional hiding, addon artwork, click/drag callbacks, legacy position migration and no duplicates")
 
 -- Unsupported spell IDs must not become fake unlearned watcher rows.
 local unsupportedID, validUnlearnedID = 99999998, 99999999

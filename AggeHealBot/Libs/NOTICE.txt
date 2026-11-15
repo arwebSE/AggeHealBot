@@ -1,0 +1,28 @@
+Bundled third-party libraries (unmodified upstream Lua files)
+
+Source snapshot: LibDBIcon WowAce SVN revision 168, retrieved 2026-11-16.
+https://repos.wowace.com/wow/libdbicon-1-0/!svn/bc/168/trunk/
+
+LibDBIcon-1.0, minor 57, by Funkeh and contributors:
+https://www.wowace.com/projects/libdbicon-1-0
+License: LibDBIcon-1.0/LICENSE.txt (Ace3 Style BSD).
+
+LibDataBroker-1.1, minor 4, by tekkub and contributors:
+https://github.com/tekkub/libdatabroker-1-1
+https://www.curseforge.com/wow/addons/libdatabroker-1-1
+Bundled as instructed by the author's "Note to addon authors": hard-embed
+LibDataBroker and declare its tools-used relationship in .pkgmeta. Original
+upstream terms apply; this library is not relicensed under AggeHealBot's MIT
+license.
+
+CallbackHandler-1.0, minor 8, by the Ace3 Development Team and contributors:
+https://www.wowace.com/projects/callbackhandler
+License: CallbackHandler-1.0/LICENSE.txt, from WoWUIDev/Ace3 LICENSE.txt.
+
+LibStub, minor 2, by Kaelten, Cladhaire, ckknight, Mikk, Ammo, Nevcairiel,
+joshborke and contributors:
+https://www.wowace.com/projects/libstub
+Public domain, as stated in the source header.
+
+These libraries retain their original ownership and terms independently of
+AggeHealBot's own source code.
