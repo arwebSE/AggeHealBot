@@ -210,3 +210,21 @@ assert(rounded[1].pulse.playing and rounded[8].texture.shown)
 A.SetGlow(rounded, {1, 0.6, 0.12}, false)
 assert(not rounded[1].pulse.playing and not rounded[8].texture.shown)
 print("PASS: rounded rectangular frame glow uses matching non-overlapping soft masks, native anchors, correct corner orientation and pulse cleanup")
+
+FocusFrame = CreateFrame("Frame")
+local focusPortrait = region()
+function focusPortrait:GetWidth() return 40 end
+function focusPortrait:GetHeight() return 40 end
+function FocusFrame:GetPortrait() return focusPortrait end
+FocusFrame.healthbar, FocusFrame.manabar = region(), region()
+A.focusButton = CreateFrame("Button", nil, FocusFrame)
+A.UpdateBuffIndicator(A.focusButton, "Thorns", 467)
+local focusOverlay = A.focusButton.children[1]
+assert(focusOverlay.textures[1].texCoord[1] == 1 and focusOverlay.textures[1].texCoord[2] == 0)
+assert(focusOverlay.textures[1].points.TOPRIGHT.relative == focusPortrait)
+assert(focusOverlay.textures[4].points.BOTTOMLEFT.relative == FocusFrame.healthbar,
+    "focus glow follows its own bar geometry instead of the target's")
+assert(A.focusButton.textures[1].points.TOPLEFT.relative == focusPortrait)
+A.UpdateBuffIndicator(A.focusButton)
+assert(not focusOverlay.pulse.playing and not focusOverlay.textures[1].shown)
+print("PASS: mirrored focus outline follows its own portrait and bars at small frame sizes, anchors its badge and stops cleanly")

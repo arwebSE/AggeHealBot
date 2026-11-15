@@ -2,7 +2,7 @@
 
 **[Download on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest)
 
-Click-to-heal on Blizzard party, raid and friendly target frames in **WoW Forever**.
+Click-to-heal on Blizzard party, raid, friendly target and focus frames in **WoW Forever**.
 
 <img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 
@@ -73,6 +73,8 @@ The watcher compares your highest learned single-target buff rank with the activ
 If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
 Target and target-of-target click healing, hover tooltips and player-only watching are **on by default** and share the Target frame toggle in `/ahb`. Friendly units use your normal bindings, while enemy frames keep their stock interactions. Player names in the binding tooltip use their class color.
+
+**Focus frame** is also on by default, with its own toggle on Home. Friendly focus units use the same editable bindings, unit menus and hover details, with casts explicitly directed to focus. Automatic buff, cure and resurrection watching remains players-only. Enemy focus interactions keep their stock behavior.
 
 The tooltip puts class and known spec on one row. Hovering an eligible player can request inspection outside combat; the spec appears when the response arrives and is cached for one hour per player, including across reloads. Cached specs remain visible during combat without talent queries or inspection requests. Forever/classic talent data uses the tree with the most spent points when there is a clear leader. Generic class labels and unknown or tied results are not shown as specs.
 

@@ -205,7 +205,7 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
         -- PlayerFrame's health bar is a nested status bar; parent the outline
         -- to the whole portrait so the pulse frames its name and both bars.
         local isPlayerFrame = frame == PlayerFrame
-        local isTargetFrame = frame == A.targetButton
+        local isTargetFrame = frame == A.targetButton or frame == A.focusButton
         local isTargetOfTarget = frame == A.targetOfTargetButton
         local host = (isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
             or frame.healthBar or frame.healthbar or frame.HealthBar or frame
@@ -223,11 +223,13 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
             playerHealth = frame.healthbar or frame.healthBar or _G.PlayerFrameHealthBar
             playerMana = frame.manabar or frame.manaBar or _G.PlayerFrameManaBar
         elseif isTargetFrame then
-            local content = TargetFrame.TargetFrameContent and TargetFrame.TargetFrameContent.TargetFrameContentMain
-            playerPortrait = TargetFrame.GetPortrait and TargetFrame:GetPortrait() or TargetFrame.portrait or _G.TargetFramePortrait
-            playerHealth = TargetFrame.healthbar or TargetFrame.healthBar
+            local visual = frame == A.focusButton and FocusFrame or TargetFrame
+            local content = visual.TargetFrameContent and visual.TargetFrameContent.TargetFrameContentMain
+            playerPortrait = visual.GetPortrait and visual:GetPortrait() or visual.portrait
+                or (frame == A.focusButton and _G.FocusFramePortrait or _G.TargetFramePortrait)
+            playerHealth = visual.healthbar or visual.healthBar
                 or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar)
-            playerMana = TargetFrame.manabar or TargetFrame.manaBar or (content and content.ManaBar)
+            playerMana = visual.manabar or visual.manaBar or (content and content.ManaBar)
         end
         view.glow = isTargetOfTarget and CreateTargetOfTargetGlow(frame)
             or playerPortrait and playerHealth and playerMana

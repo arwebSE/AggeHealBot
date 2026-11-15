@@ -14,7 +14,7 @@ local hoverHooks = {}
 local targetVisibilityDrivers = {}
 local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
-    combatResurrection = false, playerFrame = true, targetFrame = true,
+    combatResurrection = false, playerFrame = true, targetFrame = true, focusFrame = true,
     rightClickMenu = false, hideRaidControls = true,
     showUnlearned = false,
     buffsBeforeCures = false,
@@ -131,10 +131,12 @@ end
 local function TargetUnit(frame)
     if frame == A.targetButton then return "target" end
     if frame == A.targetOfTargetButton then return "targettarget" end
+    if frame == A.focusButton then return "focus" end
 end
 local function TargetVisual(frame)
     if frame == A.targetButton then return TargetFrame end
     if frame == A.targetOfTargetButton then return TargetFrameToT or (TargetFrame and TargetFrame.totFrame) end
+    if frame == A.focusButton then return FocusFrame end
 end
 local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
@@ -493,8 +495,9 @@ local function ShowFrameTooltip(frame)
     local content = visual.TargetFrameContent and visual.TargetFrameContent.TargetFrameContentMain
     local anchor = visual.healthbar or visual.healthBar or visual.HealthBar
         or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar) or visual
-    if frame == A.targetButton then
-        anchor = (visual.GetPortrait and visual:GetPortrait()) or visual.portrait or _G.TargetFramePortrait or anchor
+    if frame == A.targetButton or frame == A.focusButton then
+        anchor = (visual.GetPortrait and visual:GetPortrait()) or visual.portrait
+            or (frame == A.focusButton and _G.FocusFramePortrait or _G.TargetFramePortrait) or anchor
     end
     tooltip:ClearAllPoints()
     tooltip:SetPoint("BOTTOMLEFT", anchor, "TOPRIGHT", 8, 8)
@@ -837,7 +840,7 @@ Apply = function(frame)
 end
 local function Register(frame)
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
-    if TargetUnit(frame) and not AggeHealBotDB.targetFrame then return end
+    if TargetUnit(frame) and not AggeHealBotDB[frame == A.focusButton and "focusFrame" or "targetFrame"] then return end
     if Eligible(frame) and not InCombatLockdown() then Apply(frame) end
 end
 local function HookFunctions()
@@ -871,8 +874,9 @@ local function RestoreFrame(frame)
     end
     frames[frame] = nil
 end
-local function RegisterTargetSurface(visual, key, unit, name)
-    if not visual or (not AggeHealBotDB.targetFrame and not A[key]) then return end
+local function RegisterTargetSurface(visual, key, unit, name, option)
+    local enabled = AggeHealBotDB[option or "targetFrame"]
+    if not visual or (not enabled and not A[key]) then return end
     if not A[key] then
         -- A secure friendly-only click surface leaves the stock target button
         -- and enemy interactions intact, including target switches in combat.
@@ -898,12 +902,12 @@ local function RegisterTargetSurface(visual, key, unit, name)
         A[key] = button
     end
     local button = A[key]
-    local visibility = AggeHealBotDB.targetFrame and ("[@" .. unit .. ",exists,help] show; hide") or "hide"
+    local visibility = enabled and ("[@" .. unit .. ",exists,help] show; hide") or "hide"
     if targetVisibilityDrivers[button] ~= visibility then
         RegisterStateDriver(button, "visibility", visibility)
         targetVisibilityDrivers[button] = visibility
     end
-    if AggeHealBotDB.targetFrame then Register(button)
+    if enabled then Register(button)
     else RestoreFrame(button) end
 end
 discover = function()
@@ -911,6 +915,7 @@ discover = function()
     Register(PlayerFrame)
     RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
     RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton")
+    RegisterTargetSurface(FocusFrame, "focusButton", "focus", "AggeHealBotFocusButton", "focusFrame")
     for i = 1, 5 do
         Register(_G["PartyMemberFrame" .. i])
         Register(_G["PartyFrameMemberFrame" .. i])
@@ -1173,7 +1178,7 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
@@ -1255,6 +1260,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             A.UpdateBuffIndicator(A.targetButton)
             if hoveredFrame == A.targetButton and addonTooltip then addonTooltip:Hide() end
         end
+        if event == "PLAYER_FOCUS_CHANGED" and A.focusButton then
+            pendingBuffAttempt = nil
+            A.UpdateBuffIndicator(A.focusButton)
+            if hoveredFrame == A.focusButton and addonTooltip then addonTooltip:Hide() end
+        end
         if (event == "PLAYER_TARGET_CHANGED" or (event == "UNIT_TARGET" and not secret(arg) and arg == "target"))
             and A.targetOfTargetButton then
             pendingBuffAttempt = nil
@@ -1293,7 +1303,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
             return
         end
-        if InCombatLockdown() and (event == "MODIFIER_STATE_CHANGED" or event == "UNIT_AURA" or event == "PLAYER_TARGET_CHANGED") then
+        if InCombatLockdown() and (event == "MODIFIER_STATE_CHANGED" or event == "UNIT_AURA" or event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED") then
             for frame in pairs(frames) do UpdateCombatWatch(frame) end
             if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
         end

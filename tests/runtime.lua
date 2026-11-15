@@ -2309,3 +2309,85 @@ assert(watchersTab.normalFont == GameFontHighlight and watchersTab.highlightFont
     and watchersTab.disabledFont == GameFontHighlight, "normal/hover/disabled states use identical font metrics")
 assert(watchersTab.height == 26 and watchersTab.artHeight == 26, "tab artwork and hit area must share the compact height")
 assert(buffUI.order.menuOptions.cures.label == "Cures first (default)")
+
+-- Focus uses the shared friendly unit surface with its own default-on option.
+local beforeFocusDriver = RegisterStateDriver
+local focusExists, focusFriendly, focusPlayer, focusDead = true, true, true, false
+local focusVisibility
+local function syncFocus()
+    if focusVisibility ~= "hide" and focusExists and focusFriendly then ns.focusButton:Show()
+    else ns.focusButton:Hide() end
+end
+function RegisterStateDriver(frame, state, expression)
+    if frame == ns.focusButton then
+        assert(not combat and state == "visibility")
+        focusVisibility = expression
+        syncFocus()
+    else beforeFocusDriver(frame, state, expression) end
+end
+local existsBeforeFocus, assistBeforeFocus = UnitExists, UnitCanAssist
+UnitExists = function(unit) if unit == "focus" then return focusExists end; return existsBeforeFocus(unit) end
+UnitCanAssist = function(source, unit) if unit == "focus" then return focusFriendly end; return assistBeforeFocus(source, unit) end
+UnitIsPlayer = function(unit) return unit ~= "focus" or focusPlayer end
+UnitIsDeadOrGhost = function(unit) return unit == "focus" and focusDead end
+UnitHasIncomingResurrection = function() return false end
+UnitClass = function(unit) return unit == "focus" and "Priest" or "Druid", unit == "focus" and "PRIEST" or "DRUID" end
+for id, name in pairs({[1126] = "Mark", [467] = "Thorns", [8936] = "Regrowth", [5185] = "Healing Touch", [774] = "Rejuvenation", [437138] = "Revive"}) do
+    known[id], spellNames[id] = name, name
+end
+C_SpellBook.GetSpellBookItemInfo = function(index) return ({ {spellID = 1126}, {spellID = 467}, {spellID = 8936}, {spellID = 5185}, {spellID = 774} })[index] end
+FocusFrame = CreateFrame("Button", "FocusFrame")
+FocusFrame:SetAttribute("unit", "focus")
+FocusFrame:SetAttribute("type1", "target")
+FocusFrame:SetAttribute("type2", "menu")
+guids.focus, auras.focus, harmful.focus = "focus-A", {}, {}
+ns.ResetOptions()
+event("PLAYER_LOGIN")
+ns.ResetBindings()
+local focus = ns.focusButton
+assert(AggeHealBotDB.focusFrame and focus and focus.parent == FocusFrame and focus.shown)
+assert(focusVisibility == "[@focus,exists,help] show; hide")
+assert(focus.attrs.spell1 == "Mark" and focus.attrs.macrotext1:find("@focus,help,nodead", 1, true))
+assert(focus.attrs["shift-macrotext1"] == "/target [@focus,exists]")
+assert(focus.attrs.macrotext2:find("@focus,help,nodead", 1, true), "focus heals must never rely on mouseover or target")
+manager:CloseMenus()
+focus.scripts.OnEnter(focus)
+assert(AggeHealBotTooltip.owner == focus and AggeHealBotTooltip.lines[1]:find("Member focus", 1, true))
+mouseEdge(focus, "RightButton", true, "shift-")
+assert(currentMenu and menuUnit == "focus" and not AggeHealBotTooltip.shown, "focus uses the secure native menu")
+manager:CloseMenus()
+auras.focus = {{name = "Mark"}, {name = "Thorns"}}
+event("UNIT_AURA", "focus")
+assert(focus.attrs.spell1 == "Regrowth" and not focus.regions[2].shown)
+auras.focus, guids.focus = {}, "focus-B"
+event("PLAYER_FOCUS_CHANGED")
+assert(focus.attrs.spell1 == "Mark", "switching focus must refresh watcher state")
+combat, focusFriendly = true, false
+syncFocus()
+event("PLAYER_FOCUS_CHANGED")
+assert(not focus.shown and not focus.regions[2].shown)
+assert(FocusFrame.attrs.type1 == "target" and FocusFrame.attrs.type2 == "menu", "enemy focus retains untouched stock interactions")
+combat, focusFriendly = false, true
+syncFocus()
+event("PLAYER_REGEN_ENABLED")
+local focusMacro = focus.attrs.macrotext1
+combat = true
+ns.SetOption("focusFrame", false)
+assert(focus.attrs.macrotext1 == focusMacro, "focus option changes defer protected combat edits")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not focus.shown and not drivers[focus].type1)
+assert(AggeHealBotDB.targetFrame, "focus preference must be independent of target support")
+ns.SetOption("focusFrame", true)
+ns.SetOption("targetFrame", false)
+assert(focus.shown and focus.attrs.spell1 == "Mark", "target opt-out must not disable focus")
+ns.SetOption("targetFrame", true)
+focusPlayer = false
+event("UNIT_AURA", "focus")
+assert(focus.attrs.spell1 == "Regrowth" and not focus.regions[2].shown, "friendly NPC focus supports binds without automatic watching")
+focusPlayer, focusDead = true, true
+event("UNIT_HEALTH", "focus")
+assert(focus.attrs.macrotext1:find("[nocombat,@focus,help,dead]", 1, true), "focus supports explicit resurrection conditions")
+ns.ShowOptions()
+assert(AggeHealBotSettings.focus:GetChecked(), "Home exposes the default-on focus setting")
+print("PASS: focus bindings/menus/tooltips/watchers, explicit targeting, focus switches, secure enemy pass-through, independent setting, NPC exclusion and resurrection")

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11 — 2026-11-15
+
+- Add default-on focus-frame support with its own Home toggle: shared click bindings, explicit focus targeting, hover details, secure unit menus and player-only buff/cure/resurrection watchers. Preserve hostile focus interactions, defer protected setting changes until after combat and fit the mirrored glow to the focus portrait and bars.
+
 ## 1.0.10 — 2026-11-14
 
 - Add Home, Watchers and Paladin tabs using the talent window's native artwork. Keep tab sizing and fonts consistent, show a checkmark on the selected tab, and lock Paladin for other classes.

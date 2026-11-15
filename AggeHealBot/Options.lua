@@ -192,6 +192,7 @@ local function Update()
     panel.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
+    panel.focus:SetChecked(AggeHealBotDB.focusFrame)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     SelectPage(panel.activePage or "home")
@@ -604,7 +605,7 @@ function A.ShowOptions(host)
             panel.TitleContainer:SetPoint("TOPLEFT", 18, -1)
             panel.TitleContainer:SetPoint("TOPRIGHT", -24, -1)
         end
-        local resetY = 526
+        local resetY = 554
         panel:SetSize(780, resetY + 98)
         panel:SetPoint("CENTER")
         panel:SetFrameStrata("DIALOG")
@@ -622,7 +623,7 @@ function A.ShowOptions(host)
         end
         tinsert(UISpecialFrames, "AggeHealBotSettings")
         panel.home = CreateFrame("Frame", nil, panel)
-        panel.home:SetSize(780, 592)
+        panel.home:SetSize(780, 620)
         panel.home:SetPoint("TOPLEFT", 0, -32)
         panel.nav = {}
         for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}}) do
@@ -676,17 +677,19 @@ function A.ShowOptions(host)
             "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
         panel.target = Check("targetFrame", "Target frame", 182, -93,
             "Enable click healing, hover tooltips and watch indicators on the stock friendly target and target-of-target frames. Shift + left-click targets the unit; Shift + right-click opens its unit menu by default. All bindings can be changed below.")
+        panel.focus = Check("focusFrame", "Focus frame", 18, -149,
+            "Enable the same click bindings, hover tooltip and player-only watchers on your friendly focus frame. Enemy focus interactions stay unchanged. On by default.")
         panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -121,
-            "Use your assigned plain right-click binding instead of the native unit menu on player and target frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true)
+            "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true)
         panel.raidControls = Check("hideRaidControls", "Hide raid controls", 182, -121,
             "Hide Blizzard's raid-control side panel and its tab. Your party and raid unit frames stay visible.")
         panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,
             "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat because combat bindings cannot change based on debuffs. On by default.")
-        Text(panel.home, "MODIFIERS", 24, -164, "GameFontHighlightSmall")
+        Text(panel.home, "MODIFIERS", 24, -192, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -186 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -214 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
@@ -698,6 +701,7 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
+        panel.mouse:SetPoint("TOPLEFT", 24, -280)
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}
