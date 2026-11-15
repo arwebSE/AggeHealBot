@@ -5,6 +5,7 @@ local frames, hooks, names, learned, bindings, hookedFrames = {}, {}, {}, {}, {}
 local ready, queued, refresh, discover, Apply
 local class
 local spellDetails = {}
+local spellRanks = {}
 local openUnitMenu, openUnitMenuUnit
 local raidControlsHiddenByUs = false
 local raidControlsParent, raidControlsHolder, raidControlsWasShown
@@ -15,8 +16,9 @@ local targetVisibilityDrivers = {}
 local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
     combatResurrection = false, playerFrame = true, targetFrame = true, focusFrame = true,
-    rightClickMenu = false, hideRaidControls = true,
+    rightClickMenu = false, hideRaidControls = true, hidePartyControls = true,
     showUnlearned = false,
+    showAllRanks = false, showMinimap = true, targetOnCast = false,
     buffsBeforeCures = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
@@ -35,9 +37,18 @@ local function SpellName(id)
     end
     return names[id]
 end
+local function SpellRank(id, fallback)
+    local api = C_Spell and C_Spell.GetSpellSubtext
+    local ok, rank, unused
+    if api then ok, rank = pcall(api, id)
+    elseif GetSpellInfo then ok, unused, rank = pcall(GetSpellInfo, id) end
+    if not ok or secret(rank) or type(rank) ~= "string" or rank == "" then rank = fallback end
+    if not secret(rank) and type(rank) == "string" and rank:match("%d+") then return rank end
+end
 local function ReadSpellbook()
     wipe(learned)
     wipe(spellDetails)
+    wipe(spellRanks)
     if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines then
         local bank = Enum.SpellBookSpellBank.Player
         for i = 1, C_SpellBook.GetNumSpellBookSkillLines() do
@@ -50,6 +61,13 @@ local function ReadSpellbook()
                         local future = Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell ~= nil
                             and item.itemType == Enum.SpellBookItemType.FutureSpell
                         if not future then learned[name] = true end
+                        local subtext
+                        if C_SpellBook.GetSpellBookItemName then
+                            local ok, _, value = pcall(C_SpellBook.GetSpellBookItemName, slot, bank)
+                            if ok then subtext = value end
+                        end
+                        spellRanks[item.spellID] = {id = item.spellID, name = name, rank = SpellRank(item.spellID, subtext),
+                            passive = item.isPassive == true, future = future}
                         local previous = spellDetails[name]
                         if not previous or not future then
                             spellDetails[name] = {id = item.spellID, passive = item.isPassive == true, future = future}
@@ -62,11 +80,12 @@ local function ReadSpellbook()
         for i = 1, GetNumSpellTabs() do
             local _, _, offset, count = GetSpellTabInfo(i)
             for slot = offset + 1, offset + count do
-                local name = GetSpellBookItemName(slot, "spell")
+                local name, rank = GetSpellBookItemName(slot, "spell")
                 if name then
                     learned[name] = true
                     local _, id = GetSpellBookItemInfo(slot, "spell")
                     spellDetails[name] = {id = id, passive = IsPassiveSpell and IsPassiveSpell(slot, "spell") or false}
+                    if id then spellRanks[id] = {id = id, name = name, rank = SpellRank(id, rank), passive = spellDetails[name].passive} end
                 end
             end
         end
@@ -84,7 +103,11 @@ local function CandidateName(ids)
         if name then return name end
     end
 end
-local function IsLearned(name, spellID)
+local function IsLearned(name, spellID, exactRank)
+    if exactRank then
+        local rank = spellRanks[spellID]
+        return (rank and not rank.future) or ReadFlag(IsPlayerSpell, spellID) == true
+    end
     if learned[name] or (spellID and IsPlayerSpell and IsPlayerSpell(spellID)) then return true end
     for id, spellName in pairs(names) do
         if spellName == name and IsPlayerSpell and IsPlayerSpell(id) then return true end
@@ -114,8 +137,10 @@ local function BuildBindings()
             if custom then
                 local name = custom.spellID and SpellName(custom.spellID) or custom.spell
                 b.action = custom.action
-                b.spell = custom.action == "spell" and name and IsLearned(name, custom.spellID) and name or nil
-                b.expected = custom.action == "spell" and name or nil
+                local castName = name and custom.rank and (name .. "(" .. custom.rank .. ")") or name
+                b.spellID, b.rank = custom.spellID, custom.rank
+                b.spell = custom.action == "spell" and name and IsLearned(name, custom.spellID, custom.rank ~= nil) and castName or nil
+                b.expected = custom.action == "spell" and castName or nil
             end
             -- An unsupported/missing spell identity is not an unlearned spell.
             if b.action == "spell" and not b.spell and not b.expected then b.action = "none" end
@@ -381,6 +406,9 @@ local function HealOutOfRange(spell, unit)
     -- can return nil. The explicit-target macro still prevents a target cursor.
     return result == false or result == 0
 end
+local function CastEnding(unit)
+    return "\n/stopspelltarget" .. (AggeHealBotDB.targetOnCast and ("\n/target [@" .. unit .. ",help]") or "")
+end
 local function CastMacro(spell, combatSpell, explicitUnit)
     if not spell then return "nil" end
     local target = explicitUnit or "mouseover"
@@ -388,9 +416,9 @@ local function CastMacro(spell, combatSpell, explicitUnit)
     -- Secure cleanup also works in combat, when addon range checks cannot run.
     if combatSpell and combatSpell ~= spell then
         return "/cast [combat,@" .. target .. ",help,nodead] " .. combatSpell
-            .. "; [nocombat,@" .. target .. ",help,nodead] " .. spell .. "\n/stopspelltarget"
+            .. "; [nocombat,@" .. target .. ",help,nodead] " .. spell .. CastEnding(target)
     end
-    return "/cast [@" .. target .. ",help,nodead] " .. spell .. "\n/stopspelltarget"
+    return "/cast [@" .. target .. ",help,nodead] " .. spell .. CastEnding(target)
 end
 local function TargetMacro(frame)
     -- Native UnitFrame click-binding routing can discard type="target" when
@@ -815,7 +843,7 @@ Apply = function(frame)
         if res then clauses[#clauses + 1] = "[nocombat,@" .. target .. ",help,dead] " .. res end
         local base = frame:GetAttribute("macrotext1")
         if base and base ~= "nil" then clauses[#clauses + 1] = base:match("^/cast (.-)\n") end
-        Set(frame, "macrotext1", #clauses > 0 and ("/cast " .. table.concat(clauses, "; ") .. "\n/stopspelltarget") or nil)
+        Set(frame, "macrotext1", #clauses > 0 and ("/cast " .. table.concat(clauses, "; ") .. CastEnding(target)) or nil)
     end
     local action = (left.action == "settings" or left.action == "togglemenu") and "click" or left.action
     if action == "target" then
@@ -933,19 +961,23 @@ discover = function()
         for i = 1, 5 do Register(_G["CompactRaidGroup" .. group .. "Member" .. i]) end
     end
 end
+local function HideGroupControls()
+    if ReadFlag(IsInRaid) == true then return AggeHealBotDB.hideRaidControls end
+    return AggeHealBotDB.hidePartyControls
+end
 local function ApplyRaidControls()
     local manager = CompactRaidFrameManager
     if not manager or InCombatLockdown() then return end
     if not hooks.raidControls then
         manager:HookScript("OnShow", function(self)
-            if AggeHealBotDB.hideRaidControls and not InCombatLockdown() then
+            if HideGroupControls() and not InCombatLockdown() then
                 raidControlsHiddenByUs = true
                 self:Hide()
             end
         end)
         hooks.raidControls = true
     end
-    if AggeHealBotDB.hideRaidControls then
+    if HideGroupControls() then
         if not raidControlsHiddenByUs then
             raidControlsParent = manager:GetParent()
             raidControlsWasShown = manager:IsShown()
@@ -991,11 +1023,17 @@ local function GetWatchList(kind)
     for _, group in ipairs(BuffWatchGroups(true, kind)) do
         local id, definition = group[1], kind ~= "cures" and A.buffRanks[group[1]]
         local learnedName = Resolve(group.ids or (definition and definition.ranks) or {id})
-        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
-        list[#list + 1] = {id = id, name = SpellName(id) or learnedName or ("Spell #" .. id),
-            icon = info and info.iconID or 134400, learned = learnedName ~= nil,
-            enabled = not (saved and type(saved.disabled) == "table" and saved.disabled[id]),
-            kinds = kind == "cures" and table.concat(group, ", ", 2) or nil}
+        local name = SpellName(id) or learnedName
+        -- Cross-client candidate IDs may not exist on this client. They are
+        -- different from valid, unlearned spells and have no configurable row.
+        -- Resolve again on later refreshes rather than caching a missing name.
+        if name then
+            local info = C_Spell and C_Spell.GetSpellInfo and (C_Spell.GetSpellInfo(id) or C_Spell.GetSpellInfo(name))
+            list[#list + 1] = {id = id, name = name,
+                icon = info and info.iconID or 134400, learned = learnedName ~= nil,
+                enabled = not (saved and type(saved.disabled) == "table" and saved.disabled[id]),
+                kinds = kind == "cures" and table.concat(group, ", ", 2) or nil}
+        end
     end
     return list
 end
@@ -1067,7 +1105,7 @@ A.GetSpells = function()
     table.sort(list)
     return list
 end
-A.GetSpellChoices = function(includeUnlearned)
+A.GetSpellChoices = function(includeUnlearned, includeRanks)
     local categoryByName = {}
     for category, ids in pairs(A.spellCategories) do
         for _, id in ipairs(ids) do
@@ -1094,15 +1132,33 @@ A.GetSpellChoices = function(includeUnlearned)
             Add(name, detail and detail.id or id, name and not IsLearned(name, id))
         end
     end
+    if includeRanks then
+        for id, rank in pairs(spellRanks) do
+            if rank.rank and not rank.passive and (includeUnlearned or not rank.future) then
+                local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+                choices[#choices + 1] = {label = rank.name .. " (" .. rank.rank .. ")", spell = rank.name,
+                    spellID = id, rank = rank.rank, action = "spell", category = categoryByName[rank.name] or "other",
+                    icon = info and info.iconID, unlearned = rank.future == true}
+            end
+        end
+        for _, choice in ipairs(choices) do
+            if not choice.rank and choice.category ~= "actions" then choice.label = choice.label .. " (Auto)" end
+        end
+    end
     local order = {heals = 1, buffs = 2, utility = 3, other = 4}
     table.sort(choices, function(a, b)
         if a.unlearned ~= b.unlearned then return not a.unlearned end
         if a.category ~= b.category then return order[a.category] < order[b.category] end
+        if a.spell == b.spell and (a.rank or b.rank) then
+            if not a.rank then return true end
+            if not b.rank then return false end
+            return tonumber(a.rank:match("%d+")) < tonumber(b.rank:match("%d+"))
+        end
         return a.label < b.label
     end)
     return choices
 end
-A.SaveBinding = function(prefix, button, action, spell)
+A.SaveBinding = function(prefix, button, action, spell, spellID, rank)
     local validPrefix = false
     for _, m in ipairs(A.modifiers) do if m.prefix == prefix then validPrefix = true end end
     if not validPrefix or type(button) ~= "number" or button < 1 or button > 5 or button % 1 ~= 0 then return false end
@@ -1111,9 +1167,12 @@ A.SaveBinding = function(prefix, button, action, spell)
         if not A.actionLabels[action] then return false end
         if action == "spell" then
             local choice
-            for _, item in ipairs(A.GetSpellChoices(AggeHealBotDB.showUnlearned)) do if item.spell == spell then choice = item; break end end
+            for _, item in ipairs(A.GetSpellChoices(AggeHealBotDB.showUnlearned, rank ~= nil)) do
+                if item.spell == spell and item.rank == rank and (not rank or item.spellID == spellID) then choice = item; break end
+            end
             if not choice then return false end
-            AggeHealBotDB.bindings[prefix .. button] = {action = action, spell = spell, spellID = choice.spellID}
+            AggeHealBotDB.bindings[prefix .. button] = {action = action,
+                spell = rank and (spell .. "(" .. rank .. ")") or spell, spellID = choice.spellID, rank = rank}
         else
             AggeHealBotDB.bindings[prefix .. button] = {action = action}
         end
@@ -1126,7 +1185,8 @@ end
 A.SetOption = function(key, value)
     if optionDefaults[key] == nil then return end
     AggeHealBotDB[key] = value and true or false
-    if key == "showUnlearned" then return end
+    if key == "showMinimap" then if A.UpdateMinimap then A.UpdateMinimap() end; return end
+    if key == "showUnlearned" or key == "showAllRanks" then return end
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end
@@ -1140,6 +1200,7 @@ A.ResetOptions = function()
     AggeHealBotDB.paladinBlessings = nil
     AggeHealBotDB.buffWatch = nil
     AggeHealBotDB.cureWatchRules = nil
+    if A.UpdateMinimap then A.UpdateMinimap() end
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end

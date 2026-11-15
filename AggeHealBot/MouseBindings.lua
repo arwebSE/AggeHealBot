@@ -119,7 +119,7 @@ function A.CreateMouseBindings(parent, choose, hover)
             self.bindingIcon = isSpell and (info and info.iconID or 134400) or actionIcons[binding and binding.action or "none"]
             self.icon:SetTexture(self.bindingIcon)
             self.callout.icon:SetTexture(self.bindingIcon)
-            local learned = isSpell and binding.spell and A.IsSpellLearned(binding.spell, binding.spellID)
+            local learned = isSpell and binding.spell and A.IsSpellLearned(binding.spell, binding.spellID, binding.rank ~= nil)
             self.bindingAlpha = isSpell and not learned and 0.4 or binding and binding.action == "none" and 0.25 or 1
             self.icon:SetAlpha(self.bindingAlpha)
             self.callout.icon:SetAlpha(self.bindingAlpha)

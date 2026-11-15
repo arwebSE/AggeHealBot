@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-11-15
+
+- Let standalone settings come to the front when opened or clicked, so focus can switch naturally between AggeHealBot and AggeMinimap without interleaving their controls.
+- Add Advanced for player/target/focus frame support, Override rightclick and independent party/raid control hiding. Both hide settings default on; preserve saved raid preferences.
+- Hide watcher entries whose spell IDs cannot be resolved by the client instead of showing raw IDs and question marks. Keep valid unlearned spells configurable and retry missing spell data on later refreshes.
+- Add Show all ranks to bind specific learned spell ranks, alongside the highest-rank Auto entry. Keep fixed ranks saved when the picker is hidden or newer ranks are trained.
+- Add an optional draggable minimap button using AggeHealBot's spellbook icon. On by default; toggle it on Home.
+- Add Target on cast on Home, off by default, to select the friendly unit receiving a click-cast. Include buff, cure and resurrection casts and defer protected changes until after combat.
+
 ## 1.0.11 — 2026-11-15
 
 - Add default-on focus-frame support with its own Home toggle: shared click bindings, explicit focus targeting, hover details, secure unit menus and player-only buff/cure/resurrection watchers. Preserve hostile focus interactions, defer protected setting changes until after combat and fit the mirrored glow to the focus portrait and bars.

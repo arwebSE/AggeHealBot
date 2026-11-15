@@ -22,6 +22,8 @@ for id, name in pairs(known) do spellNames[id] = name end
 function wipe(t) for k in pairs(t) do t[k] = nil end end
 function InCombatLockdown() return combat end
 function UnitClass() return "Druid", "DRUID" end
+local inRaid = true
+function IsInRaid() return inRaid end
 function UnitIsPlayer() return true end
 function UnitExists(u) return u ~= nil end
 function UnitCanAssist() return true end
@@ -446,6 +448,8 @@ CreateFrame = function(kind, name, parent, template)
     function f:GetWidth() return self.width or 780 end
     function f:GetHeight() return self.height or 548 end
     function f:SetFrameStrata(value) self.strata = value end
+    function f:SetToplevel(value) self.topLevel = value end
+    function f:Raise() self.raises = (self.raises or 0) + 1 end
     function f:GetFrameStrata() return self.strata or "DIALOG" end
     function f:SetText(value)
         self.text = value
@@ -559,6 +563,10 @@ local category = ns.RegisterOptionsCategory()
 assert(category == registeredCategory, "category registration is idempotent")
 SlashCmdList.AGGEHEALBOT("")
 assert(AggeHealBotSettings.shown, "settings opens")
+assert(AggeHealBotSettings.topLevel and AggeHealBotSettings.raises > 0, "standalone settings must raise above other dialogs")
+local previousRaises = AggeHealBotSettings.raises
+AggeHealBotSettings.scripts.OnMouseDown(AggeHealBotSettings)
+assert(AggeHealBotSettings.raises == previousRaises + 1, "clicking HealBot must bring its full window forward")
 assert(AggeHealBotSettings.NineSlice.layout == "ButtonFrameTemplateNoPortrait", "native Blizzard frame layout")
 assert(AggeHealBotSettings.tabs[1].glow[1].pulse.playing, "selected modifier pulses")
 AggeHealBotSettings.tabs[2].scripts.OnClick()
@@ -653,6 +661,7 @@ registeredCanvas:SetSize(650, 500)
 registeredCanvas:SetFrameStrata("HIGH")
 registeredCanvas:Show()
 assert(AggeHealBotSettings == samePanel and samePanel.parent == registeredCanvas, "native settings uses the same editor instance")
+assert(not samePanel.topLevel, "embedded editor must leave focus management to native Settings")
 assert(samePanel.rows[2].button == sameBinding and samePanel.scale < 1, "same controls fit native options area")
 assert(samePanel:GetFrameStrata() == "HIGH", "embedded editor stays above native options background")
 assert(not samePanel.NineSlice.shown and not samePanel.done.shown, "embedded editor hides standalone chrome")
@@ -2391,3 +2400,148 @@ assert(focus.attrs.macrotext1:find("[nocombat,@focus,help,dead]", 1, true), "foc
 ns.ShowOptions()
 assert(AggeHealBotSettings.focus:GetChecked(), "Home exposes the default-on focus setting")
 print("PASS: focus bindings/menus/tooltips/watchers, explicit targeting, focus switches, secure enemy pass-through, independent setting, NPC exclusion and resurrection")
+
+-- Rank choices must persist independently of the picker and newer training.
+combat = false
+ns.ResetOptions()
+assert(not AggeHealBotDB.showAllRanks and AggeHealBotDB.showMinimap and not AggeHealBotDB.targetOnCast)
+spellNames[5186], known[5186] = "Healing Touch", "Healing Touch"
+C_Spell.GetSpellSubtext = function(id) return ({[5185] = "Rank 1", [5186] = "Rank 2", [5187] = "Rank 3"})[id] or "" end
+C_SpellBook.GetSpellBookSkillLineInfo = function() return {itemIndexOffset = 0, numSpellBookItems = 6} end
+C_SpellBook.GetSpellBookItemInfo = function(index)
+    return ({ {spellID = 1126}, {spellID = 467}, {spellID = 8936}, {spellID = 5185}, {spellID = 774}, {spellID = 5186} })[index]
+end
+event("SPELLS_CHANGED")
+local count, labels = 0, {}
+for _, choice in ipairs(ns.GetSpellChoices(false, false)) do if choice.spell == "Healing Touch" then count = count + 1 end end
+assert(count == 1, "normal picker keeps a single automatic-rank entry")
+for _, choice in ipairs(ns.GetSpellChoices(false, true)) do if choice.spell == "Healing Touch" then labels[#labels + 1] = choice.label end end
+assert(table.concat(labels, ",") == "Healing Touch (Auto),Healing Touch (Rank 1),Healing Touch (Rank 2)")
+ns.ShowOptions()
+AggeHealBotSettings.nav.home.scripts.OnClick(AggeHealBotSettings.nav.home)
+AggeHealBotSettings.tabs[1].scripts.OnClick(AggeHealBotSettings.tabs[1])
+AggeHealBotSettings.mouse.buttons[2].scripts.OnClick(AggeHealBotSettings.mouse.buttons[2])
+local rankPicker = AggeHealBotSpellPicker
+rankPicker.showAllRanks:SetChecked(true)
+rankPicker.showAllRanks.scripts.OnClick(rankPicker.showAllRanks)
+rankPicker.search:SetText("Healing Touch")
+assert(rankPicker.rows[1].choice.label == "Healing Touch (Auto)")
+assert(rankPicker.rows[2].choice.rank == "Rank 1")
+rankPicker.rows[2].scripts.OnClick(rankPicker.rows[2])
+assert(focus.attrs.macrotext2:find("Healing Touch(Rank 1)", 1, true))
+ns.SetOption("showAllRanks", false)
+event("SPELLS_CHANGED")
+assert(AggeHealBotDB.bindings["2"].rank == "Rank 1" and focus.attrs.macrotext2:find("Healing Touch(Rank 1)", 1, true))
+spellNames[5187], known[5187] = "Healing Touch", "Healing Touch"
+C_SpellBook.GetSpellBookSkillLineInfo = function() return {itemIndexOffset = 0, numSpellBookItems = 7} end
+local lowerRanks = C_SpellBook.GetSpellBookItemInfo
+C_SpellBook.GetSpellBookItemInfo = function(index) return index == 7 and {spellID = 5187} or lowerRanks(index) end
+event("SPELLS_CHANGED")
+assert(focus.attrs.macrotext2:find("Healing Touch(Rank 1)", 1, true), "training must not upgrade a fixed rank")
+assert(ns.SaveBinding("", 2, "spell", "Healing Touch"))
+assert(not focus.attrs.macrotext2:find("Rank", 1, true), "Auto binding removes fixed rank")
+assert(not focus.attrs.macrotext2:find("\n/target", 1, true))
+ns.SetOption("targetOnCast", true)
+assert(focus.attrs.macrotext2:find("\n/stopspelltarget\n/target [@focus,help]", 1, true))
+for _, frame in ipairs({PlayerFrame, normalParty}) do
+    assert(frame.attrs.macrotext2:find("\n/target [@mouseover,help]", 1, true), "portrait and party casts select their hovered recipient")
+end
+for unit, frame in pairs({target = ns.targetButton, targettarget = ns.targetOfTargetButton}) do
+    assert(frame.attrs.macrotext2:find("\n/target [@" .. unit .. ",help]", 1, true), "target surfaces select their explicit recipient")
+end
+assert(focus.attrs["shift-macrotext1"] == "/target [@focus,exists]", "target-only bindings are unaffected")
+local before = focus.attrs.macrotext2
+combat = true
+ns.SetOption("targetOnCast", false)
+assert(focus.attrs.macrotext2 == before, "cast behavior is deferred in combat")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not focus.attrs.macrotext2:find("\n/target", 1, true))
+assert(cvars.autoSelfCast == "1", "new casting option must not change Auto Self Cast")
+print("PASS: optional rank enumeration, Auto/rank sorting, saved exact-rank casts, hidden-picker persistence and deferred target-on-cast without global CVar changes")
+
+-- Exercise the standalone minimap button with its real click and drag callbacks.
+local createBeforeMinimap = CreateFrame
+CreateFrame = function(...)
+    local f = createBeforeMinimap(...)
+    function f:SetHighlightTexture(texture) self.highlightTexture = texture end
+    return f
+end
+Minimap = CreateFrame("Frame", "Minimap")
+Minimap:SetSize(160, 160)
+function Minimap:GetCenter() return 100, 100 end
+function Minimap:GetEffectiveScale() return 1 end
+GetCursorPosition = function() return 200, 100 end
+assert(loadfile("AggeHealBot/Minimap.lua"))("AggeHealBot", ns)
+assert(ns.minimapButton and ns.minimapButton.shown, "minimap icon is on by default")
+ns.SetOption("showMinimap", false)
+assert(not ns.minimapButton.shown)
+ns.SetOption("showMinimap", true)
+local mini = ns.minimapButton
+assert(mini and mini.shown and mini.regions[1].texture == "Interface\\AddOns\\AggeHealBot\\Media\\Icon")
+local toggles, toggleBefore = 0, ns.ToggleOptions
+ns.ToggleOptions = function() toggles = toggles + 1 end
+mini.scripts.OnClick(mini)
+assert(toggles == 1)
+mini.scripts.OnDragStart(mini)
+assert(mini.scripts.OnUpdate)
+mini.scripts.OnUpdate(mini)
+mini.scripts.OnDragStop(mini)
+assert(AggeHealBotDB.minimapAngle == 0 and not mini.scripts.OnUpdate)
+assert(mini.point[4] == 88 and mini.point[5] == 0)
+ns.ResetOptions()
+assert(mini.shown and not mini.scripts.OnUpdate)
+ns.ToggleOptions = toggleBefore
+print("PASS: minimap default-on, optional hiding, addon artwork, settings click, saved drag position and reset cleanup")
+
+-- Unsupported spell IDs must not become fake unlearned watcher rows.
+local unsupportedID, validUnlearnedID = 99999998, 99999999
+table.insert(ns.dispels.DRUID, {unsupportedID, "Magic"})
+table.insert(ns.dispels.DRUID, {validUnlearnedID, "Poison"})
+spellNames[validUnlearnedID] = "Unlearned test cure"
+local sawUnlearned = false
+for _, entry in ipairs(ns.GetCureWatchList()) do
+    assert(entry.id ~= unsupportedID and not entry.name:find("Spell #", 1, true))
+    if entry.id == validUnlearnedID then sawUnlearned = true; assert(not entry.learned) end
+end
+assert(sawUnlearned, "valid unlearned spells remain configurable")
+spellNames[unsupportedID] = "Loaded test cure"
+local recovered = false
+for _, entry in ipairs(ns.GetCureWatchList()) do if entry.id == unsupportedID then recovered = entry.name == "Loaded test cure" end end
+assert(recovered, "a temporarily unavailable spell can resolve on a later refresh")
+table.remove(ns.dispels.DRUID)
+table.remove(ns.dispels.DRUID)
+print("PASS: unresolved watcher IDs are hidden, valid unlearned rows remain and later-loaded spell data recovers")
+
+-- Advanced settings share the editor, but group-control options are independent.
+ns.ShowOptions()
+local settings = AggeHealBotSettings
+settings.nav.advanced.scripts.OnClick()
+assert(settings.activePage == "advanced" and settings.advanced.shown and not settings.home.shown)
+assert(not AggeHealBotSpellPicker.shown and settings.nav.advanced.selected)
+for _, control in ipairs({settings.player, settings.target, settings.focus, settings.rightClickMenu, settings.raidControls, settings.partyControls}) do
+    assert(control.parent == settings.advanced)
+end
+assert(AggeHealBotDB.hidePartyControls and AggeHealBotDB.hideRaidControls)
+ns.SetOption("hidePartyControls", false)
+assert(not CompactRaidFrameManager:IsVisible(), "raid hide option still applies in a raid")
+inRaid = false
+event("GROUP_ROSTER_UPDATE")
+assert(CompactRaidFrameManager:IsVisible(), "party controls restore independently on group change")
+ns.SetOption("hidePartyControls", true)
+ns.SetOption("hideRaidControls", false)
+assert(not CompactRaidFrameManager:IsVisible(), "party hide option applies outside raids")
+inRaid = true
+event("GROUP_ROSTER_UPDATE")
+assert(CompactRaidFrameManager:IsVisible(), "raid controls restore independently")
+combat = true
+ns.SetOption("hideRaidControls", true)
+assert(CompactRaidFrameManager:IsVisible(), "control reparenting waits until combat ends")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not CompactRaidFrameManager:IsVisible())
+settings.nav.home.scripts.OnClick()
+assert(settings.home.shown and not settings.advanced.shown)
+ns.ResetOptions()
+assert(AggeHealBotDB.hidePartyControls and AggeHealBotDB.hideRaidControls and AggeHealBotDB.showMinimap)
+print("PASS: Advanced navigation, moved controls, independent default-on party/raid control hiding, group switches and combat deferral")

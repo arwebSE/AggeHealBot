@@ -157,7 +157,8 @@ local function Value(binding)
     if binding.action == "spell" then
         local name = binding.spell or binding.expected
         if not name or name == "" then return A.actionLabels.none end
-        local learned = binding.spell and A.IsSpellLearned(binding.spell, binding.spellID)
+        local learned = binding.spell and A.IsSpellLearned(binding.spell, binding.spellID, binding.rank ~= nil)
+        if binding.rank then name = name:gsub("%(", " (", 1) end
         return name .. (not learned and " |cff888888(unlearned)|r" or "")
     end
     return A.actionLabels[binding.action] or binding.action
@@ -166,6 +167,7 @@ local function SelectPage(page)
     if page == "paladin" and A.GetPlayerClass() ~= "PALADIN" then page = "home" end
     panel.activePage = page
     if panel.home then panel.home:SetShown(page == "home") end
+    if panel.advanced then panel.advanced:SetShown(page == "advanced") end
     if picker then picker:SetShown(page == "home") end
     if buffPane then buffPane:SetShown(page == "buffs") end
     if toolsPane then toolsPane:SetShown(page == "paladin") end
@@ -193,8 +195,11 @@ local function Update()
     panel.player:SetChecked(AggeHealBotDB.playerFrame)
     panel.target:SetChecked(AggeHealBotDB.targetFrame)
     panel.focus:SetChecked(AggeHealBotDB.focusFrame)
+    panel.minimap:SetChecked(AggeHealBotDB.showMinimap)
+    panel.targetOnCast:SetChecked(AggeHealBotDB.targetOnCast)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
+    panel.partyControls:SetChecked(AggeHealBotDB.hidePartyControls)
     SelectPage(panel.activePage or "home")
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
@@ -208,7 +213,8 @@ local function Update()
     panel.status:SetText(InCombatLockdown() and "|cffffcc66Saved. Changes apply after combat.|r" or "Saved automatically for this character.")
     if picker then
         picker.showUnlearned:SetChecked(AggeHealBotDB.showUnlearned)
-        picker.choices = A.GetSpellChoices(AggeHealBotDB.showUnlearned)
+        picker.showAllRanks:SetChecked(AggeHealBotDB.showAllRanks)
+        picker.choices = A.GetSpellChoices(AggeHealBotDB.showUnlearned, AggeHealBotDB.showAllRanks)
         picker:Render()
     end
     if toolsPane and toolsPane:IsShown() then toolsPane:Render() end
@@ -222,14 +228,14 @@ local function OpenPicker(button)
     if not picker then
         -- Inline browser, not a second window covering the bindings.
         picker = CreateFrame("Frame", "AggeHealBotSpellPicker", panel.home)
-        picker:SetSize(390, 451)
+        picker:SetSize(390, 479)
         picker:SetPoint("TOPLEFT", 365, -43)
         picker.heading = Text(picker, "", 0, 0)
-        picker.heading:SetWidth(230)
+        picker.heading:SetWidth(384)
         picker.heading:SetWordWrap(false)
         picker.showUnlearned = CreateFrame("CheckButton", nil, picker, "UICheckButtonTemplate")
         picker.showUnlearned:SetSize(24, 24)
-        picker.showUnlearned:SetPoint("TOPLEFT", 252, 7)
+        picker.showUnlearned:SetPoint("TOPLEFT", 190, -24)
         picker.showUnlearned:SetHitRectInsets(0, -100, 0, 0)
         local unlearnedLabel = picker.showUnlearned:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         unlearnedLabel:SetPoint("LEFT", picker.showUnlearned, "RIGHT", 2, 0)
@@ -239,16 +245,35 @@ local function OpenPicker(button)
             picker.page = 1
             Update()
         end)
-        Text(picker, "Search", 0, -39, "GameFontHighlightSmall")
+        picker.showAllRanks = CreateFrame("CheckButton", nil, picker, "UICheckButtonTemplate")
+        picker.showAllRanks:SetSize(24, 24)
+        picker.showAllRanks:SetPoint("TOPLEFT", 0, -24)
+        picker.showAllRanks:SetHitRectInsets(0, -100, 0, 0)
+        local rankLabel = picker.showAllRanks:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        rankLabel:SetPoint("LEFT", picker.showAllRanks, "RIGHT", 2, 0)
+        rankLabel:SetText("Show all ranks")
+        picker.showAllRanks:SetScript("OnClick", function(self)
+            A.SetOption("showAllRanks", self:GetChecked())
+            picker.page = 1
+            Update()
+        end)
+        picker.showAllRanks:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Show all ranks", 1, 0.82, 0)
+            GameTooltip:AddLine("Bind a specific spell rank. Auto uses the highest learned rank. Hiding this list does not change saved rank bindings.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        picker.showAllRanks:SetScript("OnLeave", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
+        Text(picker, "Search", 0, -67, "GameFontHighlightSmall")
         picker.search = CreateFrame("EditBox", nil, picker, "InputBoxTemplate")
         picker.search:SetSize(323, 25)
-        picker.search:SetPoint("TOPLEFT", 60, -32)
+        picker.search:SetPoint("TOPLEFT", 60, -60)
         picker.search:SetAutoFocus(false)
         picker.tabs = {}
         local tabX = 0
         for i, item in ipairs({{"suggested", "Suggested", 80}, {"heals", "Heals", 54}, {"buffs", "Buffs", 54},
             {"utility", "Utility", 62}, {"actions", "Actions", 68}, {"all", "All", 46}}) do
-            local tab = Button(picker, item[2], item[3], tabX, -68, function()
+            local tab = Button(picker, item[2], item[3], tabX, -96, function()
                 picker.filter, picker.page = item[1], 1
                 picker:Render()
             end)
@@ -259,9 +284,9 @@ local function OpenPicker(button)
         end
         picker.rows = {}
         for i = 1, 9 do
-            local row = Button(picker, "", 384, 0, -104 - (i - 1) * 31, function(self)
+            local row = Button(picker, "", 384, 0, -132 - (i - 1) * 31, function(self)
                 local choice = self.choice
-                if choice and A.SaveBinding(picker.prefix, picker.button, choice.action, choice.spell) then
+                if choice and A.SaveBinding(picker.prefix, picker.button, choice.action, choice.spell, choice.spellID, choice.rank) then
                     Update()
                     picker:Render()
                 end
@@ -296,21 +321,21 @@ local function OpenPicker(button)
             row:HookScript("OnHide", HideTip)
             picker.rows[i] = row
         end
-        picker.empty = Text(picker, "No matching spells.", 12, -125)
-        picker.pageText = Text(picker, "", 166, -398, "GameFontHighlightSmall")
+        picker.empty = Text(picker, "No matching spells.", 12, -153)
+        picker.pageText = Text(picker, "", 166, -426, "GameFontHighlightSmall")
         local function Page(delta)
             picker.page = math.max(1, math.min(picker.pages, picker.page + delta))
             picker:Render()
         end
-        Button(picker, "< Previous", 98, 0, -391, function() Page(-1) end)
-        Button(picker, "Next >", 98, 286, -391, function() Page(1) end)
+        Button(picker, "< Previous", 98, 0, -419, function() Page(-1) end)
+        Button(picker, "Next >", 98, 286, -419, function() Page(1) end)
         local function Assign(action)
             A.SaveBinding(picker.prefix, picker.button, action)
             Update()
             picker:Render()
         end
-        Button(picker, "Restore this click", 186, 0, -425, function() Assign("default") end)
-        Button(picker, "Disable this click", 186, 198, -425, function() Assign("none") end)
+        Button(picker, "Restore this click", 186, 0, -453, function() Assign("default") end)
+        Button(picker, "Disable this click", 186, 198, -453, function() Assign("none") end)
         picker:EnableMouseWheel(true)
         picker:SetScript("OnMouseWheel", function(_, delta) Page(-delta) end)
         function picker:Render()
@@ -351,7 +376,9 @@ local function OpenPicker(button)
                     local color = categoryColors[choice.category]
                     row.category:SetTextColor(color[1], color[2], color[3])
                     row:SetAlpha(choice.unlearned and 0.45 or 1)
-                    row:Select(current and current.action == choice.action and current.spell == choice.spell)
+                    local same = current and ((choice.rank and current.rank == choice.rank and current.spellID == choice.spellID)
+                        or (not choice.rank and not current.rank and current.spell == choice.spell))
+                    row:Select(current and current.action == choice.action and same)
                     row:Show()
                 else row:Hide() end
             end
@@ -364,7 +391,7 @@ local function OpenPicker(button)
     end
     picker.prefix, picker.button = A.modifiers[selected].prefix, button
     picker.heading:SetText("Assign: " .. A.modifiers[selected].label .. A.buttons[button])
-    picker.choices = A.GetSpellChoices(AggeHealBotDB.showUnlearned)
+    picker.choices = A.GetSpellChoices(AggeHealBotDB.showUnlearned, AggeHealBotDB.showAllRanks)
     picker.actions = {}
     local actionIcons = {target = 132212, assist = 132179, togglemenu = 134331, settings = 136243, none = 132156}
     for _, action in ipairs({"target", "assist", "togglemenu", "settings", "none"}) do
@@ -563,6 +590,7 @@ local function PlaceEditor(host)
     else panel:SetPoint("CENTER") end
     panel:SetScale(1)
     panel:SetFrameStrata(host and host:GetFrameStrata() or "DIALOG")
+    panel:SetToplevel(not host)
     panel:SetMovable(not host)
     panel:SetClampedToScreen(not host)
     -- The native Options window supplies its own frame and close controls.
@@ -605,12 +633,15 @@ function A.ShowOptions(host)
             panel.TitleContainer:SetPoint("TOPLEFT", 18, -1)
             panel.TitleContainer:SetPoint("TOPRIGHT", -24, -1)
         end
-        local resetY = 554
+        local resetY = 582
         panel:SetSize(780, resetY + 98)
         panel:SetPoint("CENTER")
         panel:SetFrameStrata("DIALOG")
         panel:SetClampedToScreen(true)
         panel:EnableMouse(true)
+        panel:SetScript("OnMouseDown", function(self)
+            if not self.embeddedHost then self:Raise() end
+        end)
         panel:SetMovable(true)
         panel:RegisterForDrag("LeftButton")
         panel:SetScript("OnDragStart", function(self) if not self.embeddedHost then self:StartMoving() end end)
@@ -623,14 +654,21 @@ function A.ShowOptions(host)
         end
         tinsert(UISpecialFrames, "AggeHealBotSettings")
         panel.home = CreateFrame("Frame", nil, panel)
-        panel.home:SetSize(780, 620)
+        panel.home:SetSize(780, 648)
         panel.home:SetPoint("TOPLEFT", 0, -32)
+        panel.advanced = CreateFrame("Frame", nil, panel)
+        panel.advanced:SetSize(780, 648)
+        panel.advanced:SetPoint("TOPLEFT", 0, -32)
+        Text(panel.advanced, "Frames", 24, -45)
+        Text(panel.advanced, "Choose which Blizzard frames use your click bindings and watchers.", 24, -72, "GameFontHighlightSmall")
+        Text(panel.advanced, "Blizzard controls", 24, -215)
         panel.nav = {}
-        for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}}) do
+        for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}, {"advanced", "Advanced"}}) do
             local key = entry[1]
             local tab = PageTab(panel, entry[2], 24 + (index - 1) * 162, function()
                 if key == "home" then OpenPicker(selectedButton)
                 elseif key == "buffs" then OpenBuffs()
+                elseif key == "advanced" then SelectPage("advanced")
                 else OpenBlessings() end
             end)
             panel.nav[key] = tab
@@ -639,8 +677,8 @@ function A.ShowOptions(host)
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, resetY - 32)
         divider:SetPoint("TOPLEFT", 349, -43)
-        local function Check(key, label, x, y, description, inverted)
-            local check = CreateFrame("CheckButton", nil, panel.home, "UICheckButtonTemplate")
+        local function Check(key, label, x, y, description, inverted, parent)
+            local check = CreateFrame("CheckButton", nil, parent or panel.home, "UICheckButtonTemplate")
             check:SetPoint("TOPLEFT", x, y)
             -- Include the label in the hover/click area without stretching the
             -- stock checkbox artwork or overlapping adjacent rows.
@@ -673,23 +711,29 @@ function A.ShowOptions(host)
             "Prioritize a learned cure on plain left-click when a removable debuff is present. Runs outside combat while aura data is readable.")
         panel.combatRes = Check("combatResurrection", "Combat resurrection", 182, -37,
             "Include learned combat resurrection spells, such as Rebirth, in left-click priority for dead party or raid members. These spells may consume reagents. Off by default.")
-        panel.player = Check("playerFrame", "Player frame", 18, -93,
-            "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed below.")
-        panel.target = Check("targetFrame", "Target frame", 182, -93,
-            "Enable click healing, hover tooltips and watch indicators on the stock friendly target and target-of-target frames. Shift + left-click targets the unit; Shift + right-click opens its unit menu by default. All bindings can be changed below.")
-        panel.focus = Check("focusFrame", "Focus frame", 18, -149,
-            "Enable the same click bindings, hover tooltip and player-only watchers on your friendly focus frame. Enemy focus interactions stay unchanged. On by default.")
-        panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -121,
-            "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true)
-        panel.raidControls = Check("hideRaidControls", "Hide raid controls", 182, -121,
-            "Hide Blizzard's raid-control side panel and its tab. Your party and raid unit frames stay visible.")
+        panel.player = Check("playerFrame", "Player frame", 18, -100,
+            "Enable click healing and watch indicators on your own portrait. Shift + middle-click opens the AggeHealBot menu by default; all modifier bindings can be changed on Home.", false, panel.advanced)
+        panel.target = Check("targetFrame", "Target frame", 260, -100,
+            "Enable click healing, hover tooltips and watch indicators on the stock friendly target and target-of-target frames. All bindings can be changed on Home.", false, panel.advanced)
+        panel.focus = Check("focusFrame", "Focus frame", 18, -140,
+            "Enable the same click bindings, hover tooltip and player-only watchers on your friendly focus frame. Enemy focus interactions stay unchanged. On by default.", false, panel.advanced)
+        panel.targetOnCast = Check("targetOnCast", "Target on cast", 182, -93,
+            "Select the friendly unit you click when using a spell binding, including buff, cure and resurrection clicks. Off by default. This changes your current target; failed casts in combat can still select the clicked unit.")
+        panel.minimap = Check("showMinimap", "Minimap icon", 18, -93,
+            "Show AggeHealBot's spellbook icon beside the minimap for quick access to settings. Drag it around the minimap to move it. On by default.")
+        panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 260, -140,
+            "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true, panel.advanced)
+        panel.raidControls = Check("hideRaidControls", "Hide raid controls", 260, -245,
+            "Hide Blizzard's group-control side panel and tab while in a raid. Raid unit frames stay visible. On by default.", false, panel.advanced)
+        panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -245,
+            "Hide Blizzard's group-control side panel and tab while outside a raid, including raid-style party frames. Party unit frames stay visible. On by default.", false, panel.advanced)
         panel.combatCures = Check("combatCures", "Cure in combat", 182, -65,
             "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat because combat bindings cannot change based on debuffs. On by default.")
-        Text(panel.home, "MODIFIERS", 24, -192, "GameFontHighlightSmall")
+        Text(panel.home, "MODIFIERS", 24, -136, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -214 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -158 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
@@ -701,7 +745,7 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
-        panel.mouse:SetPoint("TOPLEFT", 24, -280)
+        panel.mouse:SetPoint("TOPLEFT", 24, -266)
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}
@@ -723,6 +767,7 @@ function A.ShowOptions(host)
     PlaceEditor(host)
     panel:Show()
     OpenPicker(selectedButton)
+    if not host then panel:Raise() end
 end
 function A.ToggleOptions()
     if panel and panel:IsVisible() then
