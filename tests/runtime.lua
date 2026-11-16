@@ -1721,6 +1721,9 @@ assert(AggeHealBotSpellPicker.filter == "suggested", "reopening the editor resto
 AggeHealBotSettings.tabs[5].scripts.OnClick()
 assert(AggeHealBotSettings.rows[3].button.label.text:find("Named fallback heal", 1, true), "a valid fallback name replaces the generic Spell placeholder")
 assert(AggeHealBotSettings.rows[3].button.label.text:find("(unlearned)", 1, true))
+assert(AggeHealBotSettings.rows[3].button.bindingIcon == 1091101
+    and AggeHealBotSettings.rows[3].button.bindingAlpha == 0.4,
+    "unlearned preset spells resolve their real icons by ID and stay dimmed")
 AggeHealBotSettings.tabs[6].scripts.OnClick()
 assert(AggeHealBotSettings.rows[3].button.label.text == "Disabled", "a preset with no resolvable identity must show Disabled")
 assert(PlayerFrame.attrs["alt-shift-type3"] == "none")

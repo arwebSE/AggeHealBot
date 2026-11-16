@@ -116,6 +116,9 @@ function A.CreateMouseBindings(parent, choose, hover)
             local spell = binding and (binding.spellID or binding.spell or binding.expected)
             local isSpell = binding and binding.action == "spell"
             local info = isSpell and spell and C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spell)
+            if isSpell and not info and (binding.spell or binding.expected) and C_Spell and C_Spell.GetSpellInfo then
+                info = C_Spell.GetSpellInfo(binding.spell or binding.expected)
+            end
             self.bindingIcon = isSpell and (info and info.iconID or 134400) or actionIcons[binding and binding.action or "none"]
             self.icon:SetTexture(self.bindingIcon)
             self.callout.icon:SetTexture(self.bindingIcon)

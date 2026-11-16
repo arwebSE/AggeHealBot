@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.4 — 2026-11-16
+
+- Keep resolved spell IDs on default bindings so unlearned spells show their real, dimmed icons in the mouse diagram instead of question marks. Retain the valid fallback spell identity when a preset has multiple candidates.
+
 ## 1.1.3 — 2026-11-16
 
 - Replace the icon with a clear healing cross and mouse pointer, using the shared Agge addon satin-gold frame. No healing or binding behavior changes.

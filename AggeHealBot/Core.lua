@@ -133,11 +133,18 @@ local function BuildBindings()
     local defaults = {}
     for _, list in ipairs({A.presets[class] or {}, A.common}) do
         for _, b in ipairs(list) do
+            local spell = type(b[4]) == "table" and Resolve(b[4]) or nil
+            local expected = type(b[4]) == "table" and CandidateName(b[4]) or nil
+            local spellID
+            if type(b[4]) == "table" then
+                for _, id in ipairs(b[4]) do
+                    if SpellName(id) == (spell or expected) then spellID = id; break end
+                end
+            end
             defaults[b[2] .. b[3]] = {
                 label = b[1], prefix = b[2], button = b[3],
                 action = type(b[4]) == "string" and b[4] or "spell",
-                spell = type(b[4]) == "table" and Resolve(b[4]) or nil,
-                expected = type(b[4]) == "table" and CandidateName(b[4]) or nil,
+                spell = spell, expected = expected, spellID = spellID,
             }
         end
     end
