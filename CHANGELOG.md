@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.4 — 2026-11-16
+## 1.1.5 — 2026-11-16
 
 - Refine the family icon into an emerald-lit healing hand with stronger classic fantasy character and a clear healing focal point. No healing or binding behavior changes.
 
