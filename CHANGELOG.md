@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3 — 2026-11-16
+
+- Replace the icon with a clear healing cross and mouse pointer, using the shared Agge addon satin-gold frame. No healing or binding behavior changes.
+
 ## 1.1.2 — 2026-11-16
 
 - Replace the custom minimap button with LibDBIcon and a LibDataBroker launcher. Bundle required libraries, keep the addon icon and visibility setting, migrate the saved drag position and register the button for minimap collectors.

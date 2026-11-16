@@ -12,6 +12,7 @@ move-folders:
     AggeHealBot/AggeHealBot: AggeHealBot
 
 ignore:
+    - assets
     - README.md
     - CHANGELOG.md
     - tests
