@@ -2,6 +2,10 @@
 
 ## 1.1.4 — 2026-11-16
 
+- Refine the family icon into an emerald-lit healing hand with stronger classic fantasy character and a clear healing focal point. No healing or binding behavior changes.
+
+## 1.1.4 — 2026-11-16
+
 - Keep resolved spell IDs on default bindings so unlearned spells show their real, dimmed icons in the mouse diagram instead of question marks. Retain the valid fallback spell identity when a preset has multiple candidates.
 
 ## 1.1.3 — 2026-11-16
