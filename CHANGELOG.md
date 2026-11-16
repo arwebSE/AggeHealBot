@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.6
+
+- Bundle the approved front-facing ruby-crystal healing cross and large native cursor, matching the CurseForge project logo and shared satin-gold family frame.
+- Update the in-game addon-list, settings and minimap icon texture. No healing or binding behavior changes.
+
 ## 1.1.5 — 2026-11-16
 
 - Refine the family icon into an emerald-lit healing hand with stronger classic fantasy character and a clear healing focal point. No healing or binding behavior changes.
