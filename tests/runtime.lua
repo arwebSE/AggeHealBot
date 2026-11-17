@@ -147,7 +147,12 @@ local function clickDelegate(delegate, button, prefix)
             "delegated Click(button) must execute regardless of the global key-down preference")
         local previous = menuBoundary
         menuBoundary = "secure-action"
-        UnitPopup_OpenMenu(nil, {ownerFrame = delegate, unit = delegate.attrs.unit}, button)
+        local owner, unit = delegate, delegate.attrs.unit
+        while not unit and owner.attrs["useparent-unit"] and owner.parent do
+            owner = owner.parent
+            unit = owner.attrs.unit
+        end
+        UnitPopup_OpenMenu(nil, {ownerFrame = delegate, unit = unit}, button)
         menuBoundary = previous
     else
         delegate.scripts.OnClick(delegate, button)
@@ -171,6 +176,7 @@ assert(loadfile("AggeHealBot/CastHints.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/UnitDetails.lua"))("AggeHealBot", ns)
 assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and buff reminders are not supported")
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/XPerl.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
 coreEvents = events
 event("ADDON_LOADED", "AggeHealBot")
@@ -2728,4 +2734,130 @@ assert(ns.GetResurrectionRank(false) == "auto" and ns.GetResurrectionRank(true) 
 assert(not focus.attrs.macrotext1:find("(Rank", 1, true), "Auto returns to name-based highest-rank casts")
 focusDead = false
 print("PASS: separate regular/combat resurrection rank dropdowns, exact secure casts, learned-family validation, combat deferral and Auto reset")
+end)()
+
+-- Installed X-Perl registry layout, without modifying any native unit buttons.
+;(function()
+assert(ns.xperlButtons == nil, "X-Perl integration must stay dormant when the registry is absent")
+combat = false
+ns.ResetOptions()
+ns.ResetBindings()
+local registry, visibility = {}, {}
+local friendly, players = {}, {}
+local beforeAssist, beforePlayer = UnitCanAssist, UnitIsPlayer
+UnitCanAssist = function(source, unit) if friendly[unit] ~= nil then return friendly[unit] end; return beforeAssist(source, unit) end
+UnitIsPlayer = function(unit) if players[unit] ~= nil then return players[unit] end; return beforePlayer(unit) end
+XPerl_ForEachUnitFrame = function(visit) for _, frame in ipairs(registry) do visit(frame) end end
+XPerl_UnitFrame_OnLoad = function() end
+local beforeVisibility = RegisterStateDriver
+local function Sync(frame)
+    local expression = visibility[frame]
+    local unit = ns.externalFrames[frame].fixedUnit
+    if expression ~= "hide" and (not unit or UnitCanAssist("player", unit)) then frame:Show() else frame:Hide() end
+end
+RegisterStateDriver = function(frame, key, expression)
+    if ns.externalFrames[frame] then
+        assert(not combat and key == "visibility")
+        visibility[frame] = expression
+        Sync(frame)
+    else beforeVisibility(frame, key, expression) end
+end
+local function Native(kind, unit)
+    local frame = CreateFrame("Button", "XPerl_Test_" .. kind)
+    frame.frameKey, frame.partyid, frame.active = kind, unit, true
+    frame:SetAttribute("unit", unit)
+    frame:SetAttribute("type1", "target")
+    frame:SetAttribute("type2", "togglemenu")
+    frame:SetFrameLevel(4)
+    frame.nameFrame = CreateFrame("Button", nil, frame)
+    frame.nameFrame:SetFrameLevel(5)
+    frame.statsFrame = CreateFrame("Frame", nil, frame)
+    frame.statsFrame:SetFrameLevel(6)
+    frame.statsFrame.healthBar = CreateFrame("StatusBar", nil, frame.statsFrame)
+    frame.statsFrame.manaBar = CreateFrame("StatusBar", nil, frame.statsFrame)
+    frame.portraitFrame = CreateFrame("Frame", nil, frame)
+    frame.scripts.OnClick = function() error("addon must not invoke native X-Perl Lua click handlers") end
+    friendly[unit], players[unit] = true, true
+    auras[unit], harmful[unit] = {}, {}
+    frame:Show()
+    registry[#registry + 1] = frame
+    return frame
+end
+local xp = Native("player", "player")
+local xt = Native("target", "target")
+local xf = Native("focus", "focus")
+local xToT = Native("targettarget", "targettarget")
+local xParty = Native("party", "party1")
+local xRaid = Native("raid", "raid1")
+local pet = Native("partypet", "partypet1")
+local partyTarget = Native("party", "party1target")
+partyTarget:SetAttribute("unitsuffix", "target")
+event("GROUP_ROSTER_UPDATE")
+for _, native in ipairs({xp, xt, xf, xToT, xParty, xRaid}) do
+    local button = ns.xperlButtons[native]
+    assert(button and button.shown and button.parent == native)
+    assert(button.template == "SecureActionButtonTemplate" and button.attrs["useparent-unit"] and button.attrs.unit == nil)
+    assert(button:GetFrameLevel() > native.statsFrame:GetFrameLevel())
+    assert(button.attrs.macrotext1:find("Mark", 1, true), "X-Perl uses the shared missing-buff watcher")
+    assert(button.attrs["shift-type1"] == "target", "target bindings use the inherited secure unit")
+    assert(native.attrs.type1 == "target" and native.attrs.type2 == "togglemenu" and native.unit == nil)
+end
+assert(not ns.xperlButtons[pet] and not ns.xperlButtons[partyTarget], "unsupported pet/party-target surfaces are excluded")
+local party = ns.xperlButtons[xParty]
+manager:CloseMenus()
+xParty.statsFrame.healthBar.scripts.OnEnter(xParty.statsFrame.healthBar)
+assert(AggeHealBotTooltip.shown and AggeHealBotTooltip.owner == party)
+assert(AggeHealBotTooltip.anchor[2] == xParty.statsFrame, "tooltip anchors next to X-Perl stats")
+harmful.party1 = {{name = "Test curse", dispelName = "Curse"}}
+event("UNIT_AURA", "party1")
+assert(party.attrs.spell1 == "Remove Curse", "X-Perl shares cure priority")
+local beforeDead = UnitIsDeadOrGhost
+UnitIsDeadOrGhost = function(unit) return unit == "party1" or beforeDead(unit) end
+event("UNIT_FLAGS", "party1")
+assert(party.attrs.macrotext1:find("help,dead]", 1, true), "X-Perl shares resurrection watching")
+UnitIsDeadOrGhost = beforeDead
+harmful.party1 = {}
+event("UNIT_AURA", "party1")
+mouseEdge(party, "RightButton", true, "shift-")
+assert(currentMenu and menuUnit == "party1" and not AggeHealBotTooltip.shown)
+manager:CloseMenus()
+local raid = ns.xperlButtons[xRaid]
+combat = true
+xRaid.attrs.unit = "raid2" -- secure header reassignment, not an addon write
+mouseEdge(raid, "RightButton", true, "shift-")
+assert(menuUnit == "raid2", "secure menu inherits combat header reassignments")
+manager:CloseMenus()
+friendly.target = false
+Sync(ns.xperlButtons[xt])
+assert(not ns.xperlButtons[xt].shown and xt.attrs.type1 == "target", "enemy target clicks pass through securely")
+local playerButton = ns.xperlButtons[xp]
+ns.SetOption("playerFrame", false)
+assert(playerButton.shown, "protected option changes wait for combat to end")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(not playerButton.shown and ns.xperlButtons[xParty].shown)
+ns.SetOption("playerFrame", true)
+assert(playerButton.shown)
+ns.SetOption("targetFrame", false)
+assert(not ns.xperlButtons[xt].shown and ns.xperlButtons[xToT].shown and playerButton.shown)
+ns.SetOption("targetFrame", true)
+friendly.target = true
+players.focus = false
+event("PLAYER_FOCUS_CHANGED")
+assert(not ns.xperlButtons[xf].regions[2].shown and ns.xperlButtons[xf].attrs.macrotext2, "NPCs keep manual heals but no watchers")
+xParty.attrs.unit, xParty.partyid = "party2", "party2"
+friendly.party2, players.party2, auras.party2, harmful.party2 = true, true, {{name = "Mark"}, {name = "Thorns"}}, {}
+event("GROUP_ROSTER_UPDATE")
+assert(party.attrs.spell1 == "Regrowth", "recycled party frames refresh the displayed unit")
+xParty.active = false
+event("GROUP_ROSTER_UPDATE")
+assert(not party.shown, "disabled X-Perl frames release addon interactions")
+local late = Native("raid", "raid3")
+callbacks.XPerl_UnitFrame_OnLoad(late)
+assert(ns.xperlButtons[late], "late-created registry frames are discovered")
+XPerl_ForEachUnitFrame = nil
+event("GROUP_ROSTER_UPDATE")
+-- No native script or unit attributes were replaced, including on shutdown.
+assert(xRaid.attrs.type1 == "target" and xRaid.attrs.type2 == "togglemenu" and xRaid.unit == nil)
+print("PASS: X-Perl registry discovery, shared binds/watchers, bar hover, inherited secure menus/targeting, combat reassignment, enemy pass-through, frame toggles, NPC exclusion and late creation")
 end)()

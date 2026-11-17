@@ -2,7 +2,8 @@ local ADDON, A = ...
 local getMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 A.version = getMetadata and getMetadata(ADDON, "Version") or "dev"
 local frames, hooks, names, learned, bindings, hookedFrames = {}, {}, {}, {}, {}, {}
-local ready, queued, refresh, discover, Apply
+local ready, queued, refresh, discover, Apply, Queue
+A.externalFrames = {}
 local class
 local spellDetails = {}
 local spellRanks = {}
@@ -169,16 +170,24 @@ local function BuildBindings()
     end
 end
 local function Unit(frame)
-    local unit = frame:GetAttribute("unit") or frame.unit
+    local external = A.externalFrames[frame]
+    local unit
+    if external then unit = external.GetUnit() else unit = frame:GetAttribute("unit") end
+    if secret(unit) then return end
+    if not unit and not external then unit = frame.unit end
     if secret(unit) or type(unit) ~= "string" then return end
     return unit
 end
 local function TargetUnit(frame)
+    local external = A.externalFrames[frame]
+    if external then return external.fixedUnit end
     if frame == A.targetButton then return "target" end
     if frame == A.targetOfTargetButton then return "targettarget" end
     if frame == A.focusButton then return "focus" end
 end
 local function TargetVisual(frame)
+    local external = A.externalFrames[frame]
+    if external then return external.visual end
     if frame == A.targetButton then return TargetFrame end
     if frame == A.targetOfTargetButton then return TargetFrameToT or (TargetFrame and TargetFrame.totFrame) end
     if frame == A.focusButton then return FocusFrame end
@@ -187,7 +196,7 @@ local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
     local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
-    if not (TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
+    if not (A.externalFrames[frame] or TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
         or name:match("^PartyFrameMemberFrame%d+$") or name:match("^CompactPartyFrameMember%d+$")
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
@@ -489,7 +498,10 @@ local function MenuButton(frame)
         state.menuButton = button
     end
     -- Apply runs outside combat, including after stock frames change units.
-    state.menuButton:SetAttribute("unit", Unit(frame))
+    if A.externalFrames[frame] then
+        state.menuButton:SetAttribute("unit", nil)
+        state.menuButton:SetAttribute("useparent-unit", true)
+    else state.menuButton:SetAttribute("unit", Unit(frame)) end
     return state.menuButton
 end
 local function BindingAction(frame, binding)
@@ -541,7 +553,8 @@ local function ShowFrameTooltip(frame)
     tooltip:SetOwner(frame, "ANCHOR_NONE")
     local visual = TargetVisual(frame) or frame
     local content = visual.TargetFrameContent and visual.TargetFrameContent.TargetFrameContentMain
-    local anchor = visual.healthbar or visual.healthBar or visual.HealthBar
+    local external = A.externalFrames[frame]
+    local anchor = (external and external.tooltipAnchor) or visual.healthbar or visual.healthBar or visual.HealthBar
         or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar) or visual
     if frame == A.targetButton or frame == A.focusButton then
         anchor = (visual.GetPortrait and visual:GetPortrait()) or visual.portrait
@@ -717,6 +730,13 @@ local function HookHover(frame, region)
         if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
     end)
 end
+function A.HideFrameHover(frame)
+    if hoveredFrame == frame then
+        hoveredFrame, hoveredRegion = nil, nil
+        if addonTooltip then addonTooltip:Hide() end
+        if GameTooltip and GameTooltip:IsOwned(frame) then GameTooltip:Hide() end
+    end
+end
 local function RefreshHint(frame)
     local state = frames[frame]
     if not state or InCombatLockdown() then return end
@@ -734,6 +754,10 @@ Apply = function(frame)
     HookHover(frame, visual.healthbar or visual.healthBar or visual.HealthBar
         or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar))
     HookHover(frame, visual.manabar or visual.manaBar or visual.ManaBar or visual.powerBar or visual.PowerBar or (content and content.ManaBar))
+    local external = A.externalFrames[frame]
+    if external then
+        for _, region in pairs(external.hoverRegions) do HookHover(frame, region) end
+    end
     if not hookedFrames[frame] then
         hookedFrames[frame] = true
         frame:HookScript("PreClick", function(self, button)
@@ -794,12 +818,12 @@ Apply = function(frame)
                     frames[frame].bindingDrivers[key] = expression
                 end
             else
-                Set(frame, key, action == "target" and "macro" or action)
+                Set(frame, key, action == "target" and not A.externalFrames[frame] and "macro" or action)
             end
         end
         if not (b.prefix == "" and b.button == 1) then
             Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
-            local macro = bindingAction == "target" and TargetMacro(frame)
+            local macro = bindingAction == "target" and not A.externalFrames[frame] and TargetMacro(frame)
                 or bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, TargetUnit(frame)) or nil
             Set(frame, b.prefix .. "macrotext" .. b.button, macro)
         end
@@ -867,8 +891,8 @@ Apply = function(frame)
     end
     local action = (left.action == "settings" or left.action == "togglemenu") and "click" or left.action
     if action == "target" then
-        action = "macro"
-        Set(frame, "macrotext1", TargetMacro(frame))
+        action = A.externalFrames[frame] and "target" or "macro"
+        Set(frame, "macrotext1", not A.externalFrames[frame] and TargetMacro(frame) or nil)
     end
     if action == "spell" then action = heal and "macro" or "none" end
     if combatRes then action = "macro" end
@@ -887,10 +911,12 @@ Apply = function(frame)
         frames[frame].watchKind, buff and A.CastProblem(buff, unit))
 end
 local function Register(frame)
+    local external = A.externalFrames[frame]
+    if external and external.option and not AggeHealBotDB[external.option] then return end
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
     local option = frame == A.focusButton and "focusFrame"
         or frame == A.targetOfTargetButton and "targetOfTargetFrame" or "targetFrame"
-    if TargetUnit(frame) and not AggeHealBotDB[option] then return end
+    if not external and TargetUnit(frame) and not AggeHealBotDB[option] then return end
     if Eligible(frame) and not InCombatLockdown() then Apply(frame) end
 end
 local function HookFunctions()
@@ -962,6 +988,7 @@ local function RegisterTargetSurface(visual, key, unit, name, option)
 end
 discover = function()
     HookFunctions()
+    if A.DiscoverXPerl then A.DiscoverXPerl(Register, RestoreFrame, Queue) end
     Register(PlayerFrame)
     RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
     RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton", "targetOfTargetFrame")
@@ -1030,7 +1057,7 @@ refresh = function()
     for frame in pairs(frames) do Apply(frame) end
     if hoveredFrame and frames[hoveredFrame] then ShowFrameTooltip(hoveredFrame) end
 end
-local function Queue()
+Queue = function()
     if queued or not ready or InCombatLockdown() then return end
     queued = true
     C_Timer.After(0, function() queued = false; refresh() end)

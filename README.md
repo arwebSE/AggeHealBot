@@ -2,7 +2,7 @@
 
 **[Download on CurseForge](https://www.curseforge.com/wow/addons/aggehealbot)** · [GitHub release](https://github.com/arwebSE/AggeHealBot/releases/latest)
 
-Click-to-heal on Blizzard party, raid, friendly target and focus frames in **WoW Forever**.
+Click-to-heal on Blizzard and supported X-Perl frames in **WoW Forever**.
 
 <img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 
@@ -89,6 +89,8 @@ Automatic buff, cure and resurrection watches apply only to players. NPCs suppor
 The **Cure in combat** toggle beside the Cures settings in Watchers enables combat cure alerts when debuff data is readable. It is on by default. Combat alerts show the cure's assigned binding. Automatic left-click cure priority runs outside combat.
 
 **Player frame**, **Hide party controls** and **Hide raid controls** are on by default under Advanced. The two control toggles independently hide Blizzard's shared side panel and tab depending on whether you are in a party or raid. Unit frames remain visible.
+
+**X-Perl:** Automatically detects the Forever build's shared unit-frame registry. Player, party, raid, friendly target, focus and target-of-target frames use the same bindings, hover details and player-only buff/cure/resurrection watchers. Existing Advanced frame toggles apply. X-Perl keeps its own enemy-frame interactions. Pet frames, party-target frames and arena frames are excluded. The adapter stays inactive when X-Perl is absent.
 
 ## Casting behavior
 

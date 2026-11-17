@@ -207,7 +207,8 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
         local isPlayerFrame = frame == PlayerFrame
         local isTargetFrame = frame == A.targetButton or frame == A.focusButton
         local isTargetOfTarget = frame == A.targetOfTargetButton
-        local host = (isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
+        local external = A.externalFrames and A.externalFrames[frame]
+        local host = (external or isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
             or frame.healthBar or frame.healthbar or frame.HealthBar or frame
         view.background = frame:CreateTexture(nil, "OVERLAY", nil, 5)
         view.background:SetColorTexture(0.04, 0.08, 0.04, 0.9)

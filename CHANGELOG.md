@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.7 — 2026-11-18
+
+- Detect Forever X-Perl's frame registry and support its player, party, raid, target, focus and target-of-target frames with shared click bindings, hover tooltips and player-only buff/cure/resurrection watchers. Keep X-Perl integration in XPerl.lua, use inherited secure units for header reassignment and retain native enemy interactions. Existing Advanced frame toggles apply.
+
 ## 1.1.6
 
 - Bundle the approved front-facing ruby-crystal healing cross and large native cursor, matching the CurseForge project logo and shared satin-gold family frame.
