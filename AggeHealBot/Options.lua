@@ -214,6 +214,10 @@ local function Update()
     panel.focus:SetChecked(AggeHealBotDB.focusFrame)
     panel.minimap:SetChecked(AggeHealBotDB.showMinimap)
     panel.targetOnCast:SetChecked(AggeHealBotDB.targetOnCast)
+    panel.showTooltip:SetChecked(AggeHealBotDB.showTooltip)
+    panel.replaceTooltip:SetChecked(AggeHealBotDB.replaceBlizzardTooltip)
+    panel.replaceTooltip:SetEnabled(AggeHealBotDB.showTooltip)
+    panel.replaceTooltip:SetAlpha(AggeHealBotDB.showTooltip and 1 or 0.45)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     panel.partyControls:SetChecked(AggeHealBotDB.hidePartyControls)
@@ -565,6 +569,9 @@ local function OpenBuffs()
             "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat. On by default.", -100)
         buffPane.combatCures:SetHitRectInsets(0, -110, 0, 0)
         panel.combatCures = buffPane.combatCures
+        buffPane.watchPets = ResCheck("watchPets", "Watch pets", 480,
+            "Include friendly pets in buff and cure watching. Pet click-healing works with this off. Other NPCs and pet resurrection are excluded. Off by default.", -60)
+        buffPane.watchPets:SetHitRectInsets(0, -80, 0, 0)
         buffPane.resurrection = ResCheck("resurrectionWatch", "Resurrection watcher", 0,
             "Offer a learned reagent-free resurrection on dead friendly players outside combat. Resurrection takes priority over cures and buffs. On by default. Turning this off also disables combat resurrection watching; manual bindings still work.")
         buffPane.combatRes = ResCheck("combatResurrection", "Combat resurrection", 380,
@@ -648,6 +655,7 @@ local function OpenBuffs()
             for index = #list + 1, #rows do rows[index]:Hide() end
         end
         function buffPane:Render()
+            self.watchPets:SetChecked(AggeHealBotDB.watchPets)
             self.combatCures:SetChecked(AggeHealBotDB.combatCures)
             self.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
             self.combatCures:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.45)
@@ -843,19 +851,23 @@ function A.ShowOptions(host)
             "Select the friendly unit you click when using a spell binding, including buff, cure and resurrection clicks. Off by default. This changes your current target; failed casts in combat can still select the clicked unit.")
         panel.minimap = Check("showMinimap", "Minimap icon", 18, -73,
             "Show AggeHealBot's spellbook icon beside the minimap for quick access to settings. Drag it around the minimap to move it. On by default.")
+        panel.showTooltip = Check("showTooltip", "Show tooltip", 18, -109,
+            "Show AggeHealBot's spell bindings and watcher information when hovering a supported unit frame. Turn off to show only the normal unit tooltip. Click bindings and watchers still work. On by default.")
         panel.rightClickMenu = Check("rightClickMenu", "Override rightclick", 18, -222,
             "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true, panel.advanced)
+        panel.replaceTooltip = Check("replaceBlizzardTooltip", "Replace Blizzard tooltip", 398, -222,
+            "Hide the normal unit tooltip while AggeHealBot's tooltip is shown on a supported frame. When Show tooltip is off, the normal tooltip remains available. Requires Show tooltip. Off by default.", false, panel.advanced)
         panel.raidControls = Check("hideRaidControls", "Hide raid controls", 398, -312,
             "Hide Blizzard's group-control side panel and tab while in a raid. Raid unit frames stay visible. On by default.", false, panel.advanced)
         panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -312,
             "Hide Blizzard's group-control side panel and tab while outside a raid, including raid-style party frames. Party unit frames stay visible. On by default.", false, panel.advanced)
         panel.paladinDebug = Check("showPaladinDebug", "Show Paladin tab (debug)", 18, -402,
             "Show and allow editing the Paladin settings tab on other classes for testing. This does not grant paladin spells or enable paladin buff watching on another class. Off by default.", false, panel.advanced)
-        Text(panel.home, "MODIFIERS", 24, -120, "GameFontHighlightSmall")
+        Text(panel.home, "MODIFIERS", 24, -156, "GameFontHighlightSmall")
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -142 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -178 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
@@ -867,7 +879,7 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
-        panel.mouse:SetPoint("TOPLEFT", 24, -250)
+        panel.mouse:SetPoint("TOPLEFT", 24, -286)
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}

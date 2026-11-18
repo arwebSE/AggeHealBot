@@ -174,6 +174,7 @@ end
 assert(loadfile("AggeHealBot/Defaults.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/CastHints.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/UnitDetails.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/PetFrames.lua"))("AggeHealBot", ns)
 assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and buff reminders are not supported")
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/XPerl.lua"))("AggeHealBot", ns)
@@ -2790,6 +2791,7 @@ local xToT = Native("targettarget", "targettarget")
 local xParty = Native("party", "party1")
 local xRaid = Native("raid", "raid1")
 local pet = Native("partypet", "partypet1")
+players.partypet1 = false
 local partyTarget = Native("party", "party1target")
 partyTarget:SetAttribute("unitsuffix", "target")
 event("GROUP_ROSTER_UPDATE")
@@ -2802,7 +2804,8 @@ for _, native in ipairs({xp, xt, xf, xToT, xParty, xRaid}) do
     assert(button.attrs["shift-type1"] == "target", "target bindings use the inherited secure unit")
     assert(native.attrs.type1 == "target" and native.attrs.type2 == "togglemenu" and native.unit == nil)
 end
-assert(not ns.xperlButtons[pet] and not ns.xperlButtons[partyTarget], "unsupported pet/party-target surfaces are excluded")
+assert(ns.xperlButtons[pet] and not ns.xperlButtons[partyTarget], "X-Perl pet frames are supported but party targets stay excluded")
+assert(not ns.xperlButtons[pet].regions[2] or not ns.xperlButtons[pet].regions[2].shown, "pet watchers default off")
 local party = ns.xperlButtons[xParty]
 manager:CloseMenus()
 xParty.statsFrame.healthBar.scripts.OnEnter(xParty.statsFrame.healthBar)
@@ -2860,4 +2863,102 @@ event("GROUP_ROSTER_UPDATE")
 -- No native script or unit attributes were replaced, including on shutdown.
 assert(xRaid.attrs.type1 == "target" and xRaid.attrs.type2 == "togglemenu" and xRaid.unit == nil)
 print("PASS: X-Perl registry discovery, shared binds/watchers, bar hover, inherited secure menus/targeting, combat reassignment, enemy pass-through, frame toggles, NPC exclusion and late creation")
+end)()
+
+-- Tooltip choices affect presentation immediately, including during combat.
+;(function()
+manager:CloseMenus()
+combat = false
+ns.ResetOptions()
+GameTooltip.scripts = GameTooltip.scripts or {}
+function GameTooltip:HookScript(name, fn)
+    local previous = self.scripts[name]
+    self.scripts[name] = function(self, ...) if previous then previous(self, ...) end; fn(self, ...) end
+end
+local nativeShow = GameTooltip.Show
+function GameTooltip:Show() nativeShow(self); if self.scripts.OnShow then self.scripts.OnShow(self) end end
+local cases = {PlayerFrame, normalParty, CompactRaidFrame1, ns.targetButton, ns.focusButton, ns.targetOfTargetButton}
+for button, info in pairs(ns.externalFrames) do if info.kind == "raid" then cases[#cases + 1] = button; break end end
+for _, frame in ipairs(cases) do
+    frame.scripts.OnEnter(frame)
+    ns.SetOption("showTooltip", false)
+    assert(not AggeHealBotTooltip.shown and GameTooltip.shown, "Home opt-out leaves the native tooltip available")
+    ns.SetOption("replaceBlizzardTooltip", true)
+    assert(GameTooltip.shown and not AggeHealBotTooltip.shown, "replacement has no effect with ours off")
+    ns.SetOption("showTooltip", true)
+    assert(AggeHealBotTooltip.shown and not GameTooltip.shown, "replacement shows only addon information")
+    GameTooltip:Show()
+    assert(not GameTooltip.shown, "native OnShow refresh cannot make the replaced tooltip blink back")
+    ns.SetOption("replaceBlizzardTooltip", false)
+    assert(GameTooltip.shown and AggeHealBotTooltip.shown, "separate mode restores both tooltips")
+    frame.scripts.OnLeave(frame)
+end
+PlayerFrame.scripts.OnEnter(PlayerFrame)
+local cast = PlayerFrame.attrs.macrotext1
+combat = true
+ns.SetOption("replaceBlizzardTooltip", true)
+ns.SetOption("showTooltip", false)
+assert(GameTooltip.shown and not AggeHealBotTooltip.shown and PlayerFrame.attrs.macrotext1 == cast)
+ns.SetOption("showTooltip", true)
+assert(not GameTooltip.shown and AggeHealBotTooltip.shown)
+local unrelated = CreateFrame("Button")
+GameTooltip:SetOwner(unrelated)
+GameTooltip:Show()
+assert(GameTooltip.shown, "replacement must not hide unrelated spell, item or settings tooltips")
+combat = false
+ns.ResetAdvancedOptions()
+assert(AggeHealBotDB.showTooltip and not AggeHealBotDB.replaceBlizzardTooltip)
+PlayerFrame.scripts.OnLeave(PlayerFrame)
+ns.ShowOptions()
+assert(AggeHealBotSettings.showTooltip.parent == AggeHealBotSettings.home
+    and AggeHealBotSettings.replaceTooltip.parent == AggeHealBotSettings.advanced)
+print("PASS: Home tooltip toggle, optional native replacement, refresh suppression, unrelated tooltip preservation, all supported frames and immediate combat updates")
+end)()
+
+-- Stock pet, normal party pet and compact raid-pet surfaces.
+;(function()
+combat = false
+ns.ResetOptions()
+local beforePlayer, beforeDead = UnitIsPlayer, UnitIsDeadOrGhost
+local deadPet = false
+UnitIsPlayer = function(unit) if ns.IsPetToken(unit) or unit == "target" then return false end; return beforePlayer(unit) end
+UnitIsOtherPlayersPet = function(unit) return unit == "target" end
+UnitIsDeadOrGhost = function(unit) if ns.IsPetToken(unit) then return deadPet end; return beforeDead(unit) end
+PetFrame = CreateFrame("Button", "PetFrame")
+PetFrame:SetAttribute("unit", "pet")
+PetFrame:SetAttribute("type1", "target")
+PetFrame:SetAttribute("type2", "togglemenu")
+normalParty.PetFrame = CreateFrame("Button", nil, normalParty)
+normalParty.PetFrame:SetAttribute("unit", "partypet1")
+CompactRaidFrame61 = CreateFrame("Button", "CompactRaidFrame61")
+CompactRaidFrame61:SetAttribute("unit", "raidpet3")
+CompactRaidFrameContainer = {frameUpdateList = {mini = {CompactRaidFrame61}}}
+for _, unit in ipairs({"pet", "partypet1", "raidpet3", "target"}) do auras[unit], harmful[unit], ranges[unit] = {}, {}, nil end
+event("UNIT_PET", "player")
+local pets = {PetFrame, normalParty.PetFrame, CompactRaidFrame61}
+for _, frame in ipairs(pets) do
+    assert(frame.attrs.macrotext1:find("Regrowth", 1, true) and not frame.attrs.macrotext1:find("Mark", 1, true), "pet heals work while watchers are off")
+    assert(frame.attrs["shift-macrotext1"]:find(frame.attrs.unit, 1, true), "pet targeting uses the frame's unit")
+    frame.scripts.OnEnter(frame)
+    assert(AggeHealBotTooltip.shown)
+    frame.scripts.OnLeave(frame)
+end
+ns.ShowOptions()
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+local petCheck = AggeHealBotBuffSettings.watchPets
+assert(not petCheck.checked and petCheck.parent == AggeHealBotBuffSettings)
+petCheck:SetChecked(true)
+petCheck.scripts.OnClick(petCheck)
+for _, frame in ipairs(pets) do assert(frame.attrs.spell1 == "Mark" and frame.regions[2].shown) end
+harmful.raidpet3 = {{name = "Pet curse", dispelName = "Curse"}}
+event("UNIT_AURA", "raidpet3")
+assert(CompactRaidFrame61.attrs.spell1 == "Remove Curse")
+ns.SetOption("combatResurrection", true)
+deadPet = true
+event("UNIT_FLAGS", "pet")
+for _, frame in ipairs(pets) do assert(not frame.attrs.macrotext1:find("help,dead", 1, true), "player resurrection must never be offered on pets") end
+deadPet = false
+ns.ResetWatchers()
+assert(not AggeHealBotDB.watchPets and PetFrame.attrs.spell1 == "Regrowth")
+print("PASS: stock/party/compact pet bindings, explicit targeting, hover, default-off pet watching, pet buff/cure opt-in and exclusion from normal/combat resurrection")
 end)()

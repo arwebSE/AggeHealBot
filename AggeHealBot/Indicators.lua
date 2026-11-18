@@ -127,9 +127,8 @@ local function CreateGlow(host, frame, compact)
     end
     return glow
 end
-local function CreateTargetOfTargetGlow(host)
-    local visual = TargetFrameToT or (TargetFrame and TargetFrame.totFrame)
-    local native = visual and visual.FrameTexture
+local function CreateNativeFrameGlow(host, visual, native)
+    native = native or (visual and visual.FrameTexture)
     if not native then return end
     local atlas = native.GetAtlas and native:GetAtlas()
     if (issecretvalue and issecretvalue(atlas)) or type(atlas) ~= "string" then return end
@@ -207,8 +206,10 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
         local isPlayerFrame = frame == PlayerFrame
         local isTargetFrame = frame == A.targetButton or frame == A.focusButton
         local isTargetOfTarget = frame == A.targetOfTargetButton
+        local petVisual, petArtwork
+        if A.PetFrameArtwork then petVisual, petArtwork = A.PetFrameArtwork(frame) end
         local external = A.externalFrames and A.externalFrames[frame]
-        local host = (external or isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
+        local host = (petVisual or external or isPlayerFrame or isTargetFrame or isTargetOfTarget) and frame
             or frame.healthBar or frame.healthbar or frame.HealthBar or frame
         view.background = frame:CreateTexture(nil, "OVERLAY", nil, 5)
         view.background:SetColorTexture(0.04, 0.08, 0.04, 0.9)
@@ -232,7 +233,8 @@ function A.UpdateBuffIndicator(frame, spell, spellID, resurrection, problem)
                 or (content and content.HealthBarsContainer and content.HealthBarsContainer.HealthBar)
             playerMana = visual.manabar or visual.manaBar or (content and content.ManaBar)
         end
-        view.glow = isTargetOfTarget and CreateTargetOfTargetGlow(frame)
+        view.glow = petArtwork and CreateNativeFrameGlow(frame, petVisual, petArtwork)
+            or isTargetOfTarget and CreateNativeFrameGlow(frame, TargetFrameToT or (TargetFrame and TargetFrame.totFrame))
             or playerPortrait and playerHealth and playerMana
             and CreatePlayerGlow(host, playerPortrait, playerHealth, playerMana, isTargetFrame)
             or CreateGlow(host, frame)

@@ -82,7 +82,7 @@ The tooltip puts class and known spec on one row. Hovering an eligible player ca
 
 By default, outside combat, plain left-click prioritizes a learned reagent-free resurrection on a dead friendly player, then a learned cure for a removable debuff, then missing buffs, then your assigned heal. The Watchers tab can put buffs before cures; resurrection stays first. Its default-on Resurrection watcher toggle can disable automatic resurrection watching without changing manual spell bindings. The adjacent Combat resurrection option requires Resurrection watcher. Each resurrection spell has its own rank dropdown: Auto uses the highest learned rank, while a selected learned rank stays fixed. Choices save per character and reset to Auto with Reset watcher settings. Rank changes made during combat apply afterward. Reset watcher settings is anchored at the bottom and restores these resurrection options too. Resurrection has a pale-blue glow, and cure watching has a red glow. Cure watching can be disabled in `/ahb`.
 
-Automatic buff, cure and resurrection watches apply only to players. NPCs support your normal click bindings.
+Automatic buff and cure watches apply to players by default. **Watch pets** in Watchers is off by default; enabling it also watches friendly pets. Stock pet, normal party-pet, compact pet and supported X-Perl pet frames accept your healing bindings and show hover tooltips regardless of this setting. Resurrection remains player-only; ordinary NPCs support manual click bindings without automatic watches.
 
 **Combat resurrection** in Watchers is off by default. Enable it to allow learned combat resurrection spells, including those that consume reagents. Combat resurrection uses secure conditions for dead party/raid members. Automatic cure priority runs outside combat, when aura data is readable.
 
@@ -90,7 +90,9 @@ The **Cure in combat** toggle beside the Cures settings in Watchers enables comb
 
 **Player frame**, **Hide party controls** and **Hide raid controls** are on by default under Advanced. The two control toggles independently hide Blizzard's shared side panel and tab depending on whether you are in a party or raid. Unit frames remain visible.
 
-**X-Perl:** Automatically detects the Forever build's shared unit-frame registry. Player, party, raid, friendly target, focus and target-of-target frames use the same bindings, hover details and player-only buff/cure/resurrection watchers. Existing Advanced frame toggles apply. X-Perl keeps its own enemy-frame interactions. Pet frames, party-target frames and arena frames are excluded. The adapter stays inactive when X-Perl is absent.
+**X-Perl:** Automatically detects the Forever build's shared unit-frame registry. Player, party, raid, friendly target, focus and target-of-target frames use the same bindings, hover details and player-only buff/cure/resurrection watchers. Existing Advanced frame toggles apply. X-Perl keeps its own enemy-frame interactions. X-Perl pet frames also use your bindings and the optional Watch pets rules. Party-target and arena frames are excluded. The adapter stays inactive when X-Perl is absent.
+
+**Show tooltip** on Home is on by default. Turn it off to hide AggeHealBot's hover binding panel while keeping the normal unit tooltip and all click bindings/watchers. **Replace Blizzard tooltip** in Advanced is off by default; enable it to hide the matching native unit/resource tooltip while ours is displayed. If Show tooltip is off, the normal tooltip is used even with replacement selected. Unrelated item, spell and settings tooltips are unaffected.
 
 ## Casting behavior
 

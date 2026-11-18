@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.8 — 2026-11-18
+
+- Add Show tooltip on Home (default on) and Replace Blizzard tooltip in Advanced (default off). Keep the normal tooltip when addon tooltips are disabled, suppress only matching unit/resource tooltips in replacement mode, and apply presentation changes immediately in combat.
+- Support stock pet, normal party-pet and compact pet frames, plus X-Perl pet frames. Trace normal pet glows against their native circular portrait/bar artwork and keep compact pet glows aligned to their rectangular frames.
+- Add Watch pets in Watchers, default off, to opt pets into buff/cure watching while leaving ordinary NPCs excluded. Pet healing bindings work without this setting; normal and combat resurrection remain player-only.
+
 ## 1.1.7 — 2026-11-18
 
 - Detect Forever X-Perl's frame registry and support its player, party, raid, target, focus and target-of-target frames with shared click bindings, hover tooltips and player-only buff/cure/resurrection watchers. Keep X-Perl integration in XPerl.lua, use inherited secure units for header reassignment and retain native enemy interactions. Existing Advanced frame toggles apply.

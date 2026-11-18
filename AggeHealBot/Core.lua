@@ -21,6 +21,8 @@ local optionDefaults = {
     rightClickMenu = false, hideRaidControls = true, hidePartyControls = true,
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
+    showTooltip = true, replaceBlizzardTooltip = false,
+    watchPets = false,
     buffsBeforeCures = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
@@ -196,7 +198,7 @@ local function Eligible(frame)
     if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
     local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
-    if not (A.externalFrames[frame] or TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
+    if not (A.externalFrames[frame] or (A.IsPetFrame and A.IsPetFrame(frame)) or TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
         or name:match("^PartyFrameMemberFrame%d+$") or name:match("^CompactPartyFrameMember%d+$")
         or name:match("^CompactRaidFrame%d+$") or name:match("^CompactRaidGroup%d+Member%d+$")) then return false end
     return true
@@ -376,10 +378,10 @@ local function BuffInRange(spell, unit)
 end
 local function WatchAllowed(unit)
     if not unit then return false end
-    return ReadFlag(UnitIsPlayer, unit) == true
+    return ReadFlag(UnitIsPlayer, unit) == true or (AggeHealBotDB.watchPets and A.IsPetUnit and A.IsPetUnit(unit)) or false
 end
 local function ResurrectionCandidate(unit, spell)
-    if not spell or not unit or unit == "player" then return end
+    if not spell or not unit or unit == "player" or ReadFlag(UnitIsPlayer, unit) ~= true then return end
     if ReadFlag(UnitCanAssist, "player", unit) ~= true or ReadFlag(UnitIsUnit, unit, "player") == true
         or ReadFlag(UnitIsDeadOrGhost, "player") ~= false then return end
     if ReadFlag(UnitExists, unit) ~= true
@@ -508,6 +510,14 @@ local function BindingAction(frame, binding)
     if (frame == PlayerFrame or TargetUnit(frame)) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
     return binding.action
 end
+local function SuppressNativeTooltip()
+    local frame = hoveredFrame
+    if not frame or not frames[frame] or not AggeHealBotDB.showTooltip or not AggeHealBotDB.replaceBlizzardTooltip
+        or not addonTooltip or not addonTooltip:IsShown() then return end
+    local visual = TargetVisual(frame) or frame
+    if GameTooltip:IsOwned(frame) or GameTooltip:IsOwned(visual)
+        or (hoveredRegion and GameTooltip:IsOwned(hoveredRegion)) then GameTooltip:Hide() end
+end
 local function ShowFrameTooltip(frame)
     local state = frames[frame]
     if not state or not GameTooltip then return end
@@ -517,15 +527,9 @@ local function ShowFrameTooltip(frame)
         return
     end
     local unit = Unit(frame)
-    -- Use an addon-owned tooltip for every supported unit frame. SetUnit would
-    -- enable automatic unit-data refreshes that can replace custom lines.
-    if not addonTooltip then
-        addonTooltip = CreateFrame("GameTooltip", "AggeHealBotTooltip", UIParent, "GameTooltipTemplate")
-        addonTooltip:SetFrameStrata("TOOLTIP")
-        addonTooltip:SetFrameLevel(100)
-        addonTooltip:EnableMouse(false)
-    end
-    if unit then
+    if not AggeHealBotDB.showTooltip and addonTooltip then addonTooltip:Hide() end
+    local replaceNative = AggeHealBotDB.showTooltip and AggeHealBotDB.replaceBlizzardTooltip
+    if unit and not replaceNative then
         -- Leave Blizzard's unit details intact, including its normal live
         -- refreshes; our binding information lives in a separate panel.
         local ownsResourceTip = hoveredFrame == frame and hoveredRegion and hoveredRegion ~= frame
@@ -548,6 +552,19 @@ local function ShowFrameTooltip(frame)
             GameTooltip:SetUnit(unit)
         end
         GameTooltip:Show()
+    end
+    if not AggeHealBotDB.showTooltip then return end
+    -- Use an addon-owned tooltip; native unit-data refreshes must not replace
+    -- its binding lines. Suppression is limited to this hovered unit's owners.
+    if not addonTooltip then
+        addonTooltip = CreateFrame("GameTooltip", "AggeHealBotTooltip", UIParent, "GameTooltipTemplate")
+        addonTooltip:SetFrameStrata("TOOLTIP")
+        addonTooltip:SetFrameLevel(100)
+        addonTooltip:EnableMouse(false)
+    end
+    if replaceNative and not hooks.nativeTooltipShow then
+        GameTooltip:HookScript("OnShow", SuppressNativeTooltip)
+        hooks.nativeTooltipShow = true
     end
     local tooltip = addonTooltip
     tooltip:SetOwner(frame, "ANCHOR_NONE")
@@ -668,6 +685,7 @@ local function ShowFrameTooltip(frame)
         end
     end
     tooltip:Show()
+    SuppressNativeTooltip()
     if heading and levelText then
         if not tooltip.ahbHeaderParts then
             tooltip.ahbHeaderParts = {
@@ -713,6 +731,10 @@ local function ShowFrameTooltip(frame)
             classText:SetPoint("BOTTOMLEFT", specText, "BOTTOMLEFT", 0, -1)
         end
     end
+end
+local function RefreshTooltip()
+    if not AggeHealBotDB.showTooltip and addonTooltip then addonTooltip:Hide() end
+    if hoveredFrame and frames[hoveredFrame] then ShowFrameTooltip(hoveredFrame) end
 end
 local function HookHover(frame, region)
     if not region or not region.HookScript or hoverHooks[region] then return end
@@ -845,6 +867,7 @@ Apply = function(frame)
     local combatRes, combatResID = ResurrectionSpell(true)
     if not watches or not AggeHealBotDB.resurrectionWatch then normalRes, combatRes = nil, nil end
     if not AggeHealBotDB.combatResurrection then combatRes = nil end
+    if ReadFlag(UnitIsPlayer, unit) ~= true then normalRes, combatRes = nil, nil end
     local res = ResurrectionCandidate(unit, normalRes or combatRes)
     local cure, cureID, debuff
     if watches and not res then cure, cureID, debuff = CureCandidate(unit) end
@@ -989,6 +1012,7 @@ end
 discover = function()
     HookFunctions()
     if A.DiscoverXPerl then A.DiscoverXPerl(Register, RestoreFrame, Queue) end
+    if A.DiscoverPetFrames then A.DiscoverPetFrames(Register) end
     Register(PlayerFrame)
     RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
     RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton", "targetOfTargetFrame")
@@ -1136,6 +1160,7 @@ function A.ResetWatchers()
     AggeHealBotDB.buffsBeforeCures = false
     AggeHealBotDB.resurrectionWatch, AggeHealBotDB.combatResurrection = true, false
     AggeHealBotDB.resurrectionRanks = nil
+    AggeHealBotDB.watchPets = false
     Queue()
 end
 function A.GetResurrectionSpell(inCombat)
@@ -1282,6 +1307,7 @@ end
 A.SetOption = function(key, value)
     if optionDefaults[key] == nil then return end
     AggeHealBotDB[key] = value and true or false
+    if key == "showTooltip" or key == "replaceBlizzardTooltip" then RefreshTooltip(); return end
     if key == "showMinimap" then if A.UpdateMinimap then A.UpdateMinimap() end; return end
     if key == "showUnlearned" or key == "showAllRanks" then return end
     Queue()
@@ -1299,14 +1325,16 @@ A.ResetOptions = function()
     AggeHealBotDB.cureWatchRules = nil
     AggeHealBotDB.resurrectionRanks = nil
     if A.UpdateMinimap then A.UpdateMinimap() end
+    RefreshTooltip()
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end
 function A.ResetAdvancedOptions()
     for _, key in ipairs({"playerFrame", "targetFrame", "targetOfTargetFrame", "focusFrame",
-        "rightClickMenu", "hidePartyControls", "hideRaidControls", "showPaladinDebug"}) do
+        "rightClickMenu", "hidePartyControls", "hideRaidControls", "showPaladinDebug", "replaceBlizzardTooltip"}) do
         AggeHealBotDB[key] = optionDefaults[key]
     end
+    RefreshTooltip()
     Queue()
     if InCombatLockdown() then for frame in pairs(frames) do UpdateCombatWatch(frame) end end
 end

@@ -70,6 +70,7 @@ function PlayerFrame.portrait:GetHeight() return restrictedDimensions and secret
 PlayerFrame.healthbar, PlayerFrame.manabar = region(), region()
 C_Spell = {GetSpellInfo = function() return {iconID = 123} end}
 local A = {}
+assert(loadfile("AggeHealBot/PetFrames.lua"))("AggeHealBot", A)
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", A)
 A.UpdateBuffIndicator(PlayerFrame, "Mark of the Wild", 1126)
 local overlay = PlayerFrame.children[1]
@@ -228,3 +229,30 @@ assert(A.focusButton.textures[1].points.TOPLEFT.relative == focusPortrait)
 A.UpdateBuffIndicator(A.focusButton)
 assert(not focusOverlay.pulse.playing and not focusOverlay.textures[1].shown)
 print("PASS: mirrored focus outline follows its own portrait and bars at small frame sizes, anchors its badge and stops cleanly")
+
+-- Pet frames must trace their own artwork, rather than the target's contour.
+PetFrame = CreateFrame("Frame")
+PetFrameTexture = region()
+PetFrameTexture:SetAtlas("UI-HUD-UnitFrame-TargetofTarget-PortraitOn")
+PetFrame.healthbar = region()
+PetFrameTexture.GetWidth, PetFrameTexture.GetHeight = forbiddenCoordinateRead, forbiddenCoordinateRead
+A.UpdateBuffIndicator(PetFrame, "Mark", 1126)
+local petGlow = PetFrame.children[1]
+assert(#petGlow.textures == 3 and petGlow.pulse.playing)
+for _, texture in ipairs(petGlow.textures) do
+    assert(texture.points.TOPLEFT.relative == PetFrameTexture and texture.points.BOTTOMRIGHT.relative == PetFrameTexture)
+end
+A.UpdateBuffIndicator(PetFrame)
+assert(not petGlow.pulse.playing)
+local partyOwner = CreateFrame("Frame")
+local partyPet = CreateFrame("Frame", nil, partyOwner)
+partyOwner.PetFrame = partyPet
+function partyPet:GetParent() return partyOwner end
+partyPet.Texture = region()
+partyPet.Texture:SetAtlas("ui-hud-unitframe-party-portraiton")
+partyPet.Texture.GetWidth, partyPet.Texture.GetHeight = forbiddenCoordinateRead, forbiddenCoordinateRead
+partyPet.HealthBar = region()
+A.UpdateBuffIndicator(partyPet, "Mark", 1126)
+assert(partyPet.children[1].textures[1].points.TOPLEFT.relative == partyPet.Texture)
+assert(partyPet.children[1].textures[1].atlas == "ui-hud-unitframe-party-portraiton")
+print("PASS: pet and normal party-pet glow traces the correct native circle/bar artwork, avoids restricted geometry reads and stops cleanly")

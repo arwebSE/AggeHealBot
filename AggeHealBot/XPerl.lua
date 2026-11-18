@@ -12,22 +12,24 @@ local function Unit(frame)
 end
 
 -- Use X-Perl's registry rather than guessing secure header child names.
--- Do not attach to pets, party targets, arena or other unsupported unit types.
+-- Party targets, arena and other unsupported unit types are left alone.
 function A.VisitXPerlFrames(visit)
     if type(XPerl_ForEachUnitFrame) ~= "function" then return end
     XPerl_ForEachUnitFrame(function(frame)
         local kind = frame.frameKey
         if not public(kind) or type(kind) ~= "string" then return end
-        if not options[kind] and kind ~= "party" and kind ~= "raid" then return end
+        local pet = kind == "pet" or kind == "partypet" or kind == "raidpet"
+        if not options[kind] and kind ~= "party" and kind ~= "raid" and not pet then return end
         local suffix = frame:GetAttribute("unitsuffix")
-        if not public(suffix) or suffix then return end
+        if not public(suffix) or (suffix and not (pet and suffix == "pet")) then return end
         local unit = frame:GetAttribute("unit")
         if not public(unit) then return end
         if not unit then unit = frame.partyid end
         if not public(unit) then return end
         if unit and (type(unit) ~= "string" or not (fixedUnits[kind] == unit
             or kind == "party" and (unit == "player" or unit:match("^party%d+$"))
-            or kind == "raid" and unit:match("^raid%d+$"))) then return end
+            or kind == "raid" and unit:match("^raid%d+$")
+            or pet and A.IsPetToken and A.IsPetToken(unit))) then return end
         visit(frame, kind, options[kind], fixedUnits[kind])
     end)
 end
