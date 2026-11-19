@@ -22,7 +22,7 @@ local optionDefaults = {
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
     showTooltip = true, replaceBlizzardTooltip = false,
-    watchPets = false,
+    watchPets = true,
     buffsBeforeCures = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
@@ -130,6 +130,21 @@ local function ResurrectionSpell(inCombat)
     local name = Resolve(ids)
     return name, name and spellDetails[name] and spellDetails[name].id or ids[1]
 end
+function A.GetMouseButtons()
+    local list, seen = {1, 2, 3, 4, 5}, {}
+    local db = AggeHealBotDB or {}
+    for number, enabled in pairs(type(db.extraMouseButtons) == "table" and db.extraMouseButtons or {}) do
+        if enabled and type(number) == "number" and number % 1 == 0 and number > 5 and number <= A.maxMouseButtons then seen[number] = true end
+    end
+    for key in pairs(db.bindings or {}) do
+        local number = type(key) == "string" and tonumber(key:match("(%d+)$"))
+        if number and number > 5 and number <= A.maxMouseButtons then
+            for _, mod in ipairs(A.modifiers) do if key == mod.prefix .. number then seen[number] = true; break end end
+        end
+    end
+    for number = 6, A.maxMouseButtons do if seen[number] then list[#list + 1] = number end end
+    return list
+end
 local function BuildBindings()
     ReadSpellbook()
     wipe(bindings)
@@ -151,8 +166,9 @@ local function BuildBindings()
             }
         end
     end
+    local buttonNumbers = A.GetMouseButtons()
     for _, mod in ipairs(A.modifiers) do
-        for button = 1, 5 do
+        for _, button in ipairs(buttonNumbers) do
             local key = mod.prefix .. button
             local b = defaults[key] or {label = mod.label .. A.buttons[button], prefix = mod.prefix,
                 button = button, action = (key == "1" and "target" or "none")}
@@ -195,7 +211,8 @@ local function TargetVisual(frame)
     if frame == A.focusButton then return FocusFrame end
 end
 local function Eligible(frame)
-    if not frame or not frame.GetAttribute or not frame.RegisterForClicks then return false end
+    if not frame or (frame.IsForbidden and frame:IsForbidden()) or frame.namePlateFrame
+        or not frame.GetAttribute or not frame.RegisterForClicks then return false end
     local name = frame:GetName() or ""
     local normalPartyMember = PartyFrame and frame.GetParent and frame:GetParent() == PartyFrame
     if not (A.externalFrames[frame] or (A.IsPetFrame and A.IsPetFrame(frame)) or TargetUnit(frame) or normalPartyMember or name == "PlayerFrame" or name:match("^PartyMemberFrame%d+$")
@@ -503,11 +520,12 @@ local function MenuButton(frame)
     if A.externalFrames[frame] then
         state.menuButton:SetAttribute("unit", nil)
         state.menuButton:SetAttribute("useparent-unit", true)
+        state.menuButton:SetAttribute("useparent-unitsuffix", true)
     else state.menuButton:SetAttribute("unit", Unit(frame)) end
     return state.menuButton
 end
 local function BindingAction(frame, binding)
-    if (frame == PlayerFrame or TargetUnit(frame)) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
+    if (frame == PlayerFrame or (TargetUnit(frame) and (not A.externalFrames[frame] or A.externalFrames[frame].option))) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
     return binding.action
 end
 local function SuppressNativeTooltip()
@@ -674,7 +692,7 @@ local function ShowFrameTooltip(frame)
         tooltip:AddLine("Healing first: below 90% health.", 0.65, 1, 0.65)
     end
     for _, b in ipairs(bindings) do
-        if b.prefix == prefix then
+        if b.prefix == prefix and (b.button <= 5 or b.action ~= "none") then
             local action = BindingAction(frame, b)
             local value = action == "spell" and (b.spell or b.expected) or A.actionLabels[action] or action
             if b.button == 1 and prefix == "" and not InCombatLockdown() then value = state.nextBuff or value end
@@ -861,7 +879,7 @@ Apply = function(frame)
     local watches = WatchAllowed(unit) and left.action == "spell"
     frames[frame].canHealFirst = watches and heal ~= nil
     frames[frame].healingFirst = frames[frame].canHealFirst and A.NeedsHealing(unit) or false
-    if watches and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit) end
+    if watches and ReadFlag(UnitIsPlayer, unit) == true and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit) end
     frames[frame].unitDead = ReadFlag(UnitIsDeadOrGhost, unit)
     local normalRes, normalResID = ResurrectionSpell(false)
     local combatRes, combatResID = ResurrectionSpell(true)
@@ -934,6 +952,8 @@ Apply = function(frame)
         frames[frame].watchKind, buff and A.CastProblem(buff, unit))
 end
 local function Register(frame)
+    -- Compact frame hooks also receive forbidden nameplate children.
+    if not frame or (frame.IsForbidden and frame:IsForbidden()) or frame.namePlateFrame then return end
     local external = A.externalFrames[frame]
     if external and external.option and not AggeHealBotDB[external.option] then return end
     if frame == PlayerFrame and not AggeHealBotDB.playerFrame then return end
@@ -1160,7 +1180,7 @@ function A.ResetWatchers()
     AggeHealBotDB.buffsBeforeCures = false
     AggeHealBotDB.resurrectionWatch, AggeHealBotDB.combatResurrection = true, false
     AggeHealBotDB.resurrectionRanks = nil
-    AggeHealBotDB.watchPets = false
+    AggeHealBotDB.watchPets = true
     Queue()
 end
 function A.GetResurrectionSpell(inCombat)
@@ -1283,7 +1303,7 @@ end
 A.SaveBinding = function(prefix, button, action, spell, spellID, rank)
     local validPrefix = false
     for _, m in ipairs(A.modifiers) do if m.prefix == prefix then validPrefix = true end end
-    if not validPrefix or type(button) ~= "number" or button < 1 or button > 5 or button % 1 ~= 0 then return false end
+    if not validPrefix or type(button) ~= "number" or button < 1 or button > A.maxMouseButtons or button % 1 ~= 0 then return false end
     if action == "default" then AggeHealBotDB.bindings[prefix .. button] = nil
     else
         if not A.actionLabels[action] then return false end
@@ -1299,9 +1319,25 @@ A.SaveBinding = function(prefix, button, action, spell, spellID, rank)
             AggeHealBotDB.bindings[prefix .. button] = {action = action}
         end
     end
+    if button > 5 then
+        AggeHealBotDB.extraMouseButtons = AggeHealBotDB.extraMouseButtons or {}
+        AggeHealBotDB.extraMouseButtons[button] = true
+    end
     -- Keep the displayed bindings consistent with the active secure attributes in combat.
     if not InCombatLockdown() then BuildBindings() end
     Queue()
+    return true
+end
+function A.RememberMouseButton(number)
+    if type(number) ~= "number" or number % 1 ~= 0 or number < 1 or number > A.maxMouseButtons then return false end
+    if number > 5 then
+        AggeHealBotDB.extraMouseButtons = AggeHealBotDB.extraMouseButtons or {}
+        if not AggeHealBotDB.extraMouseButtons[number] then
+            AggeHealBotDB.extraMouseButtons[number] = true
+            if not InCombatLockdown() then BuildBindings() end
+            Queue()
+        end
+    end
     return true
 end
 A.SetOption = function(key, value)

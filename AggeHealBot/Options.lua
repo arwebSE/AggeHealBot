@@ -3,6 +3,7 @@ local panel, picker, selected, selectedButton = nil, nil, 1, 1
 local optionsCanvas, optionsCategory
 local toolsPane
 local buffPane
+local FitEditor
 local categoryLabels = {heals = "Heal", buffs = "Buff", utility = "Utility", other = "Other", actions = "Action"}
 local categoryColors = {heals = {0.5, 1, 0.7}, buffs = {0.5, 0.75, 1}, utility = {0.8, 0.6, 1}, other = {0.6, 0.62, 0.66}, actions = {0.85, 0.75, 0.5}}
 local selectionGold = {1, 0.76, 0.2}
@@ -169,6 +170,7 @@ end
 local function SelectPage(page)
     if page == "paladin" and not CanShowPaladin() then page = "home" end
     panel.activePage = page
+    if page ~= "home" and panel.identifier then panel.identifier:Stop() end
     if panel.status then panel.status:SetShown(page ~= "buffs") end
     if panel.home then panel.home:SetShown(page == "home") end
     if panel.advanced then panel.advanced:SetShown(page == "advanced") end
@@ -198,6 +200,7 @@ local function Current(prefix, button)
     for _, b in ipairs(A.GetBindings()) do
         if b.prefix == prefix and b.button == button then return b end
     end
+    return {action = "none"}
 end
 local function Update()
     if not panel then return end
@@ -230,8 +233,17 @@ local function Update()
         row.button:Select(i == selectedButton)
         row.button:SetBinding(binding)
     end
-    panel.mouse:SetCaption(A.buttons[selectedButton], Value(Current(A.modifiers[selected].prefix, selectedButton)),
-        panel.mouse.buttons[selectedButton].bindingIcon, panel.mouse.buttons[selectedButton].bindingAlpha)
+    local prefix = A.modifiers[selected].prefix
+    panel.identifier:Render(A.GetMouseButtons(), prefix, selectedButton, Current)
+    local icon, alpha = A.GetBindingVisual(Current(prefix, selectedButton))
+    panel.mouse:SetCaption(A.buttons[selectedButton], Value(Current(prefix, selectedButton)), icon, alpha)
+    local extraHeight = panel.identifier.hasExtras and 62 or 0
+    panel:SetSize(780, 680 + extraHeight)
+    panel.home:SetSize(780, 648 + extraHeight)
+    panel.advanced:SetSize(780, 648 + extraHeight)
+    panel.mouse:SetSize(315, 264 + extraHeight)
+    panel.divider:SetSize(1, 550 + extraHeight)
+    if panel.embeddedHost and FitEditor then FitEditor(panel.embeddedHost) end
     panel.status:SetText(InCombatLockdown() and "|cffffcc66Saved. Changes apply after combat.|r" or "Saved automatically for this character.")
     if picker then
         picker.showUnlearned:SetChecked(AggeHealBotDB.showUnlearned)
@@ -569,8 +581,8 @@ local function OpenBuffs()
             "Show cure alerts during combat when debuff data is readable. Requires Cure watcher. The tooltip shows your assigned cure binding. Automatic left-click cure priority runs outside combat. On by default.", -100)
         buffPane.combatCures:SetHitRectInsets(0, -110, 0, 0)
         panel.combatCures = buffPane.combatCures
-        buffPane.watchPets = ResCheck("watchPets", "Watch pets", 480,
-            "Include friendly pets in buff and cure watching. Pet click-healing works with this off. Other NPCs and pet resurrection are excluded. Off by default.", -60)
+        buffPane.watchPets = ResCheck("watchPets", "Cure pets", 480,
+            "Include friendly pets in cure watching. Pet click-healing works with this off. Buff and resurrection watches remain player-only. On by default.", -60)
         buffPane.watchPets:SetHitRectInsets(0, -80, 0, 0)
         buffPane.resurrection = ResCheck("resurrectionWatch", "Resurrection watcher", 0,
             "Offer a learned reagent-free resurrection on dead friendly players outside combat. Resurrection takes priority over cures and buffs. On by default. Turning this off also disables combat resurrection watching; manual bindings still work.")
@@ -699,7 +711,7 @@ local function OpenBuffs()
     buffPane:Render()
     buffPane:Show()
 end
-local function FitEditor(host)
+FitEditor = function(host)
     if not panel or panel.embeddedHost ~= host then return end
     local width, height = host:GetWidth(), host:GetHeight()
     if width > 0 and height > 0 then panel:SetScale(math.min(1, width / 780, height / panel:GetHeight())) end
@@ -804,6 +816,7 @@ function A.ShowOptions(host)
             panel.nav[key] = tab
         end
         local divider = panel.home:CreateTexture(nil, "BACKGROUND")
+        panel.divider = divider
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, resetY - 32)
         divider:SetPoint("TOPLEFT", 349, -43)
@@ -880,6 +893,17 @@ function A.ShowOptions(host)
             GameTooltip:Show()
         end)
         panel.mouse:SetPoint("TOPLEFT", 24, -286)
+        panel.identifier = A.CreateButtonIdentifier(panel.mouse, Button, function(number, prefix)
+            if not A.RememberMouseButton(number) then return end
+            for index, mod in ipairs(A.modifiers) do if mod.prefix == prefix then selected = index; break end end
+            OpenPicker(number)
+        end, OpenPicker, function(owner, number)
+            GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+            GameTooltip:SetText(A.modifiers[selected].label .. A.buttons[number], 1, 0.82, 0)
+            GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, number)), 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        panel.identifier.onStart = function() if picker then picker.search:ClearFocus() end end
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do
             panel.rows[i] = {button = button}
@@ -900,7 +924,9 @@ function A.ShowOptions(host)
         panel.status:ClearAllPoints()
         panel.status:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 58)
         panel.done = Button(panel, "Done", 100, 655, -resetY - 58, A.CloseOptions)
-        panel:SetScript("OnHide", function() if picker then picker:Hide() end; if toolsPane then toolsPane:Hide() end; if buffPane then buffPane:Hide() end end)
+        panel.done:ClearAllPoints()
+        panel.done:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -25, 13)
+        panel:SetScript("OnHide", function() panel.identifier:Stop(); if picker then picker:Hide() end; if toolsPane then toolsPane:Hide() end; if buffPane then buffPane:Hide() end end)
         for _, event in ipairs({"PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "SPELLS_CHANGED"}) do panel:RegisterEvent(event) end
         panel:SetScript("OnEvent", Update)
     end

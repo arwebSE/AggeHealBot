@@ -1,5 +1,7 @@
 local _, A = ...
 A.buttons = {"Left", "Right", "Middle", "Button 4", "Button 5"}
+A.maxMouseButtons = 31
+for button = 6, A.maxMouseButtons do A.buttons[button] = "Button " .. button end
 A.modifiers = {
     {label = "", prefix = ""}, {label = "Shift + ", prefix = "shift-"},
     {label = "Ctrl + ", prefix = "ctrl-"}, {label = "Alt + ", prefix = "alt-"},

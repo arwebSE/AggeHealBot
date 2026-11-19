@@ -107,6 +107,7 @@ function CreateFrame(_, name, parent, template)
     function f:RegisterForClicks(...) assert(not combat); self.clicks = {...} end
     function f:HookScript(k, fn) self.scripts[k] = fn end
     function f:SetScript(k, fn) self.scripts[k] = fn end
+    function f:GetScript(k) return self.scripts[k] end
     function f:RegisterEvent() events = self end
     function f:Hide() end
     return f
@@ -147,17 +148,28 @@ local function clickDelegate(delegate, button, prefix)
             "delegated Click(button) must execute regardless of the global key-down preference")
         local previous = menuBoundary
         menuBoundary = "secure-action"
-        local owner, unit = delegate, delegate.attrs.unit
-        while not unit and owner.attrs["useparent-unit"] and owner.parent do
-            owner = owner.parent
-            unit = owner.attrs.unit
-        end
+        local unit = SecureButton_GetUnit(delegate)
         UnitPopup_OpenMenu(nil, {ownerFrame = delegate, unit = unit}, button)
         menuBoundary = previous
     else
         delegate.scripts.OnClick(delegate, button)
     end
     if delegate.scripts.PostClick then delegate.scripts.PostClick(delegate, button) end
+end
+-- Match secure inheritance of unit and unitsuffix independently.
+function SecureButton_GetUnit(frame)
+    local function Attribute(owner, name)
+        local value = owner.attrs[name]
+        if value == nil and owner.attrs["useparent-" .. name] and owner.parent then return Attribute(owner.parent, name) end
+        return value
+    end
+    local unit = Attribute(frame, "unit")
+    local suffix = Attribute(frame, "unitsuffix")
+    if unit and suffix then
+        unit = unit .. suffix
+        unit = unit:gsub("^playerpet$", "pet"):gsub("^party(%d+)pet$", "partypet%1"):gsub("^raid(%d+)pet$", "raidpet%1")
+    end
+    return unit
 end
 local function mouseEdge(frame, button, down, prefix)
     local wanted = down and "AnyDown" or "AnyUp"
@@ -445,7 +457,7 @@ local originalCreateFrame = CreateFrame
 CreateFrame = function(kind, name, parent, template)
     local f = originalCreateFrame(kind, name, parent, template)
     if name then _G[name] = f end
-    for _, method in ipairs({"SetSize", "SetWidth", "SetWordWrap", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetJustifyH", "SetFocus", "ClearFocus"}) do
+    for _, method in ipairs({"SetSize", "SetWidth", "SetWordWrap", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetFontObject", "SetMaxLetters", "SetJustifyH", "SetFocus", "ClearFocus"}) do
         f[method] = function() end
     end
     function f:SetParent(value) self.parent = value end
@@ -466,6 +478,14 @@ CreateFrame = function(kind, name, parent, template)
     function f:GetStringWidth() return #(self.text or "") * 5 end
     function f:SetChecked(v) self.checked = v end
     function f:SetEnabled(value) self.enabled = value end
+    function f:EnableKeyboard(value) self.keyboardEnabled = value end
+    function f:SetNumeric() end
+    function f:SetHeight(value) self.height = value end
+    function f:SetPropagateKeyboardInput() error("identifier must never change protected keyboard propagation") end
+    function f:SetPropagateMouseClicks() error("identifier must never change protected mouse propagation") end
+    function f:SetFocus() self.focused = true end
+    function f:ClearFocus() self.focused = false end
+    function f:IsMouseOver() return self.mouseOver == true end
     function f:SetNormalFontObject(value) self.normalFont = value end
     function f:SetHighlightFontObject(value) self.highlightFont = value end
     function f:SetDisabledFontObject(value) self.disabledFont = value end
@@ -564,6 +584,7 @@ C_Texture = {GetAtlasInfo = function()
     return {width = 96, height = 144, leftTexCoord = 0, rightTexCoord = 1, topTexCoord = 0, bottomTexCoord = 1}
 end}
 assert(loadfile("AggeHealBot/MouseBindings.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/ButtonIdentify.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Options.lua"))("AggeHealBot", ns)
 assert(registeredCanvas and registeredCategory, "editor registered in Options AddOns")
 local category = ns.RegisterOptionsCategory()
@@ -2791,6 +2812,17 @@ local xToT = Native("targettarget", "targettarget")
 local xParty = Native("party", "party1")
 local xRaid = Native("raid", "raid1")
 local pet = Native("partypet", "partypet1")
+pet.parent = xParty
+pet.attrs.unit = nil
+pet:SetAttribute("useparent-unit", true)
+pet:SetAttribute("unitsuffix", "pet")
+local mainPet = Native("pet", "pet")
+local raidPet = Native("raidpet", "raidpet1")
+raidPet.parent = xRaid
+raidPet.attrs.unit = nil
+raidPet:SetAttribute("useparent-unit", true)
+raidPet:SetAttribute("unitsuffix", "pet")
+players.pet, players.raidpet1 = false, false
 players.partypet1 = false
 local partyTarget = Native("party", "party1target")
 partyTarget:SetAttribute("unitsuffix", "target")
@@ -2806,6 +2838,22 @@ for _, native in ipairs({xp, xt, xf, xToT, xParty, xRaid}) do
 end
 assert(ns.xperlButtons[pet] and not ns.xperlButtons[partyTarget], "X-Perl pet frames are supported but party targets stay excluded")
 assert(not ns.xperlButtons[pet].regions[2] or not ns.xperlButtons[pet].regions[2].shown, "pet watchers default off")
+for _, native in ipairs({pet, mainPet, raidPet}) do
+    local overlay = assert(ns.xperlButtons[native])
+    assert(overlay.attrs.macrotext1:find("Regrowth", 1, true))
+    assert(overlay.attrs["useparent-unitsuffix"] and SecureButton_GetUnit(overlay) == native.partyid)
+    mouseEdge(overlay, "RightButton", true, "shift-")
+    assert(menuUnit == native.partyid, "secure menu must address the pet, not its owner")
+    manager:CloseMenus()
+end
+combat = true
+xParty.attrs.unit = "party2"
+mouseEdge(ns.xperlButtons[pet], "RightButton", true, "shift-")
+assert(menuUnit == "partypet2", "pet menu must follow secure owner reassignment during combat")
+manager:CloseMenus()
+xParty.attrs.unit = "party1"
+combat = false
+assert(ns.xperlButtons[mainPet].attrs.macrotext1:find("@pet", 1, true), "main pet heals explicitly address the pet")
 local party = ns.xperlButtons[xParty]
 manager:CloseMenus()
 xParty.statsFrame.healthBar.scripts.OnEnter(xParty.statsFrame.healthBar)
@@ -2946,10 +2994,10 @@ end
 ns.ShowOptions()
 AggeHealBotSettings.nav.buffs.scripts.OnClick()
 local petCheck = AggeHealBotBuffSettings.watchPets
-assert(not petCheck.checked and petCheck.parent == AggeHealBotBuffSettings)
+assert(petCheck.checked and petCheck.parent == AggeHealBotBuffSettings)
 petCheck:SetChecked(true)
 petCheck.scripts.OnClick(petCheck)
-for _, frame in ipairs(pets) do assert(frame.attrs.spell1 == "Mark" and frame.regions[2].shown) end
+for _, frame in ipairs(pets) do assert(frame.attrs.spell1 == "Regrowth" and (not frame.regions[2] or not frame.regions[2].shown), "pet cures opt-in must not enable buffs") end
 harmful.raidpet3 = {{name = "Pet curse", dispelName = "Curse"}}
 event("UNIT_AURA", "raidpet3")
 assert(CompactRaidFrame61.attrs.spell1 == "Remove Curse")
@@ -2959,6 +3007,118 @@ event("UNIT_FLAGS", "pet")
 for _, frame in ipairs(pets) do assert(not frame.attrs.macrotext1:find("help,dead", 1, true), "player resurrection must never be offered on pets") end
 deadPet = false
 ns.ResetWatchers()
-assert(not AggeHealBotDB.watchPets and PetFrame.attrs.spell1 == "Regrowth")
-print("PASS: stock/party/compact pet bindings, explicit targeting, hover, default-off pet watching, pet buff/cure opt-in and exclusion from normal/combat resurrection")
+assert(AggeHealBotDB.watchPets and PetFrame.attrs.spell1 == "Regrowth")
+print("PASS: stock/party/compact pet bindings, explicit targeting, hover, default-on pet cure watching and exclusion from normal/combat resurrection")
+end)()
+
+-- Extra mouse buttons use the same secure bindings; discovery never casts.
+;(function()
+combat = false
+ns.ResetOptions()
+ns.ResetBindings()
+local oldShift, oldCtrl, oldAlt = IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
+IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = function() return false end, function() return false end, function() return false end
+ns.ShowOptions()
+local settings, identify = AggeHealBotSettings, AggeHealBotSettings.identifier
+local base = #ns.GetBindings()
+assert(#ns.GetMouseButtons() == 5 and settings.height == 680)
+identify.identify.scripts.OnClick()
+assert(identify.active and identify.capture.shown)
+identify.capture.scripts.OnMouseDown(identify.capture, "RightButton")
+assert(AggeHealBotSpellPicker.button == 2 and settings.mouse.buttons[2].selected)
+identify.capture.scripts.OnMouseDown(identify.capture, "Button7")
+assert(AggeHealBotDB.extraMouseButtons[7] and AggeHealBotSpellPicker.button == 7)
+assert(#ns.GetBindings() == base + #ns.modifiers and PlayerFrame.attrs.type7 == "none")
+assert(settings.height == 742 and identify.chips[1].number == 7 and identify.chips[1].selected)
+assert(settings.mouse.captionTitle.text == "Button 7" and identify.hint.text == "Detected: Button 7")
+for _, region in ipairs(settings.mouse.buttons) do assert(not region.selected and not region.pulse.playing) end
+AggeHealBotSpellPicker.search:SetText("Regrowth")
+assert(AggeHealBotSpellPicker.rows[1].choice.spell == "Regrowth")
+AggeHealBotSpellPicker.rows[1].scripts.OnClick(AggeHealBotSpellPicker.rows[1])
+assert(PlayerFrame.attrs.macrotext7:find("Regrowth", 1, true) and ns.focusButton.attrs.macrotext7:find("@focus", 1, true))
+assert(PetFrame.attrs.macrotext7:find("Regrowth", 1, true))
+for frame, info in pairs(ns.externalFrames) do
+    if info.kind == "raid" then assert(frame.attrs.macrotext7:find("Regrowth", 1, true), "extra buttons also apply to X-Perl frames") end
+end
+assert(not ns.SaveBinding("", 32, "target") and not ns.RememberMouseButton(0))
+assert(ns.SaveBinding("ctrl-shift-", 31, "spell", "Healing Touch", 5185, "Rank 1"))
+assert(PlayerFrame.attrs["ctrl-shift-macrotext31"]:find("Healing Touch(Rank 1)", 1, true))
+assert(ns.SaveBinding("", 31, "togglemenu"))
+manager:CloseMenus()
+mouseEdge(PlayerFrame, "Button31", true)
+assert(currentMenu and menuUnit == "player", "extra-button unit menus use the same secure delegate")
+manager:CloseMenus()
+local previous = PlayerFrame.attrs.macrotext7
+combat = true
+assert(ns.SaveBinding("", 7, "spell", "Healing Touch"))
+assert(PlayerFrame.attrs.macrotext7 == previous)
+identify.capture.scripts.OnMouseDown(identify.capture, "Button12")
+assert(AggeHealBotDB.extraMouseButtons[12] and PlayerFrame.attrs.type12 == nil, "detecting during combat must not mutate protected bindings")
+identify:Stop()
+assert(not identify.active and not identify.input.focused, "capture can stop safely during combat")
+identify.identify.scripts.OnClick()
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(PlayerFrame.attrs.macrotext7:find("Healing Touch", 1, true) and PlayerFrame.attrs.type12 == "none")
+identify.capture.mouseOver = true
+local selectedBeforeKey = AggeHealBotSpellPicker.button
+identify.capture.scripts.OnEnter(identify.capture)
+identify.input.scripts.OnKeyDown(identify.input, "1")
+assert(identify.hint.text:find("keyboard key 1", 1, true) and identify.input.focused)
+assert(AggeHealBotSpellPicker.button == selectedBeforeKey, "keyboard input must not pretend to be a mouse binding")
+identify.capture.mouseOver = false
+identify.input.scripts.OnKeyDown(identify.input, "W")
+assert(not identify.input.focused, "keys outside the capture area must pass through")
+IsShiftKeyDown = function() return true end
+identify.capture.scripts.OnMouseDown(identify.capture, "Button6")
+assert(AggeHealBotSpellPicker.prefix == "shift-" and AggeHealBotSpellPicker.button == 6)
+for number = 8, 15 do ns.RememberMouseButton(number) end
+settings.scripts.OnEvent()
+assert(identify.pages > 1)
+identify.next.scripts.OnClick()
+assert(identify.page == 2 and identify.chips[1].number > 6)
+identify.chips[1].scripts.OnClick(identify.chips[1])
+assert(AggeHealBotSpellPicker.button == identify.chips[1].number)
+ns.ResetBindings()
+assert(AggeHealBotDB.extraMouseButtons[7] and PlayerFrame.attrs.type7 == "none", "reset bindings keeps detected hardware but clears assignments")
+settings.nav.advanced.scripts.OnClick()
+assert(not identify.active and not identify.capture.shown)
+settings.nav.home.scripts.OnClick()
+identify.identify.scripts.OnClick()
+settings.done.scripts.OnClick()
+assert(not identify.active and not identify.capture.shown and not identify.input.focused)
+IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = oldShift, oldCtrl, oldAlt
+print("PASS: buttons 6–31, detection/highlights, shared picker/ranks/modifiers/menus, active-only registration, paging, combat deferral, keyboard diagnosis and capture cleanup")
+end)()
+
+-- The optional simulator calls UI events, never input injection or secure casts.
+;(function()
+assert(loadfile("tools/AggeHealBotButtonTest/ButtonTest.lua"))("AggeHealBotButtonTest", {})
+SlashCmdList.AGGEHEALBOTBUTTONTEST("")
+local tester = AggeHealBotButtonTestWindow
+assert(tester and tester.shown)
+tester.quick[1].scripts.OnClick()
+assert(AggeHealBotSpellPicker.button == 6 and AggeHealBotSettings.identifier.hint.text:find("Simulation:", 1, true))
+tester.modifier.menuOptions[2].choose()
+tester.number:SetText("31")
+tester.send.scripts.OnClick()
+assert(AggeHealBotSpellPicker.button == 31 and AggeHealBotSpellPicker.prefix == "shift-")
+assert(tester.status.text:find("Shift + Button 31", 1, true))
+assert(not AggeHealBotButtonTest.Simulate(32))
+assert(not AggeHealBotButtonTest.Simulate(6.5))
+tester.close.scripts.OnClick()
+assert(not tester.shown and not AggeHealBotSettings.identifier.active)
+print("PASS: separate local simulator exercises real capture and modifier UI, validates input and stops identification on close")
+end)()
+
+-- Nameplate discovery must not query forbidden objects, even outside combat.
+;(function()
+local function ForbiddenAccess() error("forbidden frame API queried") end
+local forbidden = {IsForbidden = function() return true end, GetName = ForbiddenAccess, GetAttribute = ForbiddenAccess, GetParent = ForbiddenAccess}
+local nameplate = {namePlateFrame = {}, GetName = ForbiddenAccess, GetAttribute = ForbiddenAccess, GetParent = ForbiddenAccess}
+assert(not ns.IsPetFrame(forbidden) and not ns.IsPetFrame(nameplate))
+for _, frame in ipairs({forbidden, nameplate}) do
+    callbacks.CompactUnitFrame_SetUnit(frame)
+end
+print("PASS: forbidden and nameplate frames rejected before protected frame queries")
 end)()

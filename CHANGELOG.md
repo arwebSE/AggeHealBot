@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.9 — 2026-11-19
+
+- Fix forbidden-nameplate discovery, X-Perl pet unit/suffix inheritance and combat-safe mouse-button identification.
+- Limit pet watchers to cures, enabled by default; never suggest buffs or resurrection on pets.
+- Support client-reported mouse buttons 6–31 with the same spells, ranks, modifiers, targeting and secure menus as buttons 1–5. Only create extra binding slots for detected or saved buttons.
+- Add Identify buttons to Home. Press a button over the mouse diagram to select and highlight it; detected extra buttons appear in a paged numbered strip with their binding icons. Identify keyboard-mapped side-button input without changing keyboard bindings or casting spells.
+- Keep detected buttons per character, stop input capture when leaving Home or closing settings, and defer protected binding changes until after combat.
+
 ## 1.1.8 — 2026-11-18
 
 - Add Show tooltip on Home (default on) and Replace Blizzard tooltip in Advanced (default off). Keep the normal tooltip when addon tooltips are disabled, suppress only matching unit/resource tooltips in replacement mode, and apply presentation changes immediately in combat.

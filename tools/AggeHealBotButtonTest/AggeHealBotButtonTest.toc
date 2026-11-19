@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: AggeHealBot Button Test (local)
+## Notes: Local UI-event simulator for extra mouse bindings. Does not emulate mouse hardware or cast spells.
+## Author: Agge
+## Version: 0.1.0
+## Dependencies: AggeHealBot
+
+ButtonTest.lua

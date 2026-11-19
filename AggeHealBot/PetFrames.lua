@@ -18,7 +18,7 @@ local function partyPet(frame)
     return parent and parent.PetFrame == frame
 end
 function A.IsPetFrame(frame)
-    if not frame or not frame.GetAttribute then return false end
+    if not frame or (frame.IsForbidden and frame:IsForbidden()) or frame.namePlateFrame or not frame.GetAttribute then return false end
     if frame == PetFrame or partyPet(frame) then return true end
     local name = frame.GetName and frame:GetName() or ""
     local unit = frame:GetAttribute("unit")

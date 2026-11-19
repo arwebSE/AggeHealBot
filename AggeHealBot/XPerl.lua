@@ -5,9 +5,11 @@ local function public(value) return not (issecretvalue and issecretvalue(value))
 local visibility = {}
 local hooked
 local function Unit(frame)
-    local unit = frame:GetAttribute("unit")
+    -- Party pets inherit their owner's unit and append a pet suffix.
+    local unit = SecureButton_GetUnit and SecureButton_GetUnit(frame)
     if not public(unit) then return end
     if not unit then unit = frame.partyid end
+    if not unit then unit = frame:GetAttribute("unit") end
     if public(unit) and type(unit) == "string" then return unit end
 end
 
@@ -16,21 +18,20 @@ end
 function A.VisitXPerlFrames(visit)
     if type(XPerl_ForEachUnitFrame) ~= "function" then return end
     XPerl_ForEachUnitFrame(function(frame)
+        if frame.IsForbidden and frame:IsForbidden() then return end
         local kind = frame.frameKey
         if not public(kind) or type(kind) ~= "string" then return end
         local pet = kind == "pet" or kind == "partypet" or kind == "raidpet"
         if not options[kind] and kind ~= "party" and kind ~= "raid" and not pet then return end
         local suffix = frame:GetAttribute("unitsuffix")
         if not public(suffix) or (suffix and not (pet and suffix == "pet")) then return end
-        local unit = frame:GetAttribute("unit")
-        if not public(unit) then return end
-        if not unit then unit = frame.partyid end
+        local unit = Unit(frame)
         if not public(unit) then return end
         if unit and (type(unit) ~= "string" or not (fixedUnits[kind] == unit
             or kind == "party" and (unit == "player" or unit:match("^party%d+$"))
             or kind == "raid" and unit:match("^raid%d+$")
             or pet and A.IsPetToken and A.IsPetToken(unit))) then return end
-        visit(frame, kind, options[kind], fixedUnits[kind])
+        visit(frame, kind, options[kind], fixedUnits[kind] or (kind == "pet" and "pet" or nil))
     end)
 end
 
@@ -61,6 +62,8 @@ function A.DiscoverXPerl(register, restore, requestRefresh)
             button:SetAllPoints(visual)
             -- Header reassignment is inherited securely, including in combat.
             button:SetAttribute("useparent-unit", true)
+            button:SetAttribute("useparent-unitsuffix", true)
+            button:SetAttribute("toggleForVehicle", visual:GetAttribute("toggleForVehicle"))
             button:HookScript("OnHide", function(self)
                 A.UpdateBuffIndicator(self)
                 A.HideFrameHover(self)

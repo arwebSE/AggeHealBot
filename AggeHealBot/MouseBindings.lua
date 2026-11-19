@@ -2,6 +2,18 @@ local _, A = ...
 local media = "Interface\\AddOns\\AggeHealBot\\Media\\"
 local highlight = {1, 0.06, 0.025}
 local actionIcons = {target = 132212, assist = 132179, togglemenu = 134331, settings = 136243, none = 132156}
+function A.GetBindingVisual(binding)
+    local spell = binding and (binding.spellID or binding.spell or binding.expected)
+    local isSpell = binding and binding.action == "spell"
+    local info = isSpell and spell and C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spell)
+    if isSpell and not info and (binding.spell or binding.expected) and C_Spell and C_Spell.GetSpellInfo then
+        info = C_Spell.GetSpellInfo(binding.spell or binding.expected)
+    end
+    local icon = isSpell and (info and info.iconID or 134400) or actionIcons[binding and binding.action or "none"]
+    local learned = isSpell and binding.spell and A.IsSpellLearned(binding.spell, binding.spellID, binding.rank ~= nil)
+    local alpha = isSpell and not learned and 0.4 or binding and binding.action == "none" and 0.25 or 1
+    return icon, alpha
+end
 -- Exact sprites and pulse timing used by Blizzard's classic TutorialFrame.
 local tutorialTexture = "Interface\\TutorialFrame\\UI-TUTORIAL-FRAME"
 local sprites = {
@@ -113,17 +125,9 @@ function A.CreateMouseBindings(parent, choose, hover)
             end
         end
         function button:SetBinding(binding)
-            local spell = binding and (binding.spellID or binding.spell or binding.expected)
-            local isSpell = binding and binding.action == "spell"
-            local info = isSpell and spell and C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spell)
-            if isSpell and not info and (binding.spell or binding.expected) and C_Spell and C_Spell.GetSpellInfo then
-                info = C_Spell.GetSpellInfo(binding.spell or binding.expected)
-            end
-            self.bindingIcon = isSpell and (info and info.iconID or 134400) or actionIcons[binding and binding.action or "none"]
+            self.bindingIcon, self.bindingAlpha = A.GetBindingVisual(binding)
             self.icon:SetTexture(self.bindingIcon)
             self.callout.icon:SetTexture(self.bindingIcon)
-            local learned = isSpell and binding.spell and A.IsSpellLearned(binding.spell, binding.spellID, binding.rank ~= nil)
-            self.bindingAlpha = isSpell and not learned and 0.4 or binding and binding.action == "none" and 0.25 or 1
             self.icon:SetAlpha(self.bindingAlpha)
             self.callout.icon:SetAlpha(self.bindingAlpha)
         end
