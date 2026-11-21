@@ -41,7 +41,7 @@ function RegisterAttributeDriver(f, attr, expression)
     local value = combat and first or second
     f:SetAttribute(attr, value ~= "nil" and value or nil)
 end
-function UnregisterAttributeDriver(f, attr) assert(not combat); drivers[f][attr] = nil end
+function UnregisterAttributeDriver(f, attr) assert(not combat); if drivers[f] then drivers[f][attr] = nil end end
 local function Region()
     local r = {}
     for _, method in ipairs({"SetPoint", "SetAllPoints", "SetAtlas", "SetAlpha", "SetVertexColor", "SetHeight", "SetWidth", "SetSize", "SetTexCoord", "SetDrawLayer", "SetJustifyH", "SetWordWrap", "SetTextColor"}) do
@@ -191,6 +191,7 @@ assert(ns.presets.MAGE == nil and ns.buffs.MAGE == nil, "mage utility preset and
 assert(loadfile("AggeHealBot/Indicators.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/XPerl.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Core.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/HoverCast.lua"))("AggeHealBot", ns)
 coreEvents = events
 event("ADDON_LOADED", "AggeHealBot")
 event("PLAYER_LOGIN")
@@ -585,6 +586,7 @@ C_Texture = {GetAtlasInfo = function()
 end}
 assert(loadfile("AggeHealBot/MouseBindings.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/ButtonIdentify.lua"))("AggeHealBot", ns)
+assert(loadfile("AggeHealBot/HoverOptions.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/Options.lua"))("AggeHealBot", ns)
 assert(registeredCanvas and registeredCategory, "editor registered in Options AddOns")
 local category = ns.RegisterOptionsCategory()
@@ -3121,4 +3123,187 @@ for _, frame in ipairs({forbidden, nameplate}) do
     callbacks.CompactUnitFrame_SetUnit(frame)
 end
 print("PASS: forbidden and nameplate frames rejected before protected frame queries")
+end)()
+
+-- Hover keys use restricted enter/leave bindings, never ordinary combat writes.
+;(function()
+combat = false
+ns.ResetOptions()
+assert(AggeHealBotDB.hovercast == false)
+local wrapped, overrides, proxies = {}, {}, {}
+local beforeCreate = CreateFrame
+CreateFrame = function(kind, name, parent, template)
+    local frame = beforeCreate(kind, name, parent, template)
+    if name and name:find("AggeHealBotHoverKey", 1, true) then proxies[name] = frame end
+    return frame
+end
+function ClearOverrideBindings(owner) assert(not combat, "insecure combat clear"); overrides[owner] = nil end
+function SetOverrideBindingClick(owner, priority, key, name, button)
+    assert(not combat, "insecure combat binding")
+    overrides[owner] = overrides[owner] or {}
+    overrides[owner][key] = {name = name, button = button}
+end
+local function Handle(frame)
+    return {
+        GetAttribute = function(_, key) return frame.attrs[key] end,
+        SetAttribute = function(_, key, value) frame.attrs[key] = value end,
+        ClearBindings = function() overrides[frame] = nil end,
+        SetBindingClick = function(_, priority, key, name, button)
+            overrides[frame] = overrides[frame] or {}
+            overrides[frame][key] = {name = name, button = button}
+        end,
+    }
+end
+function SecureHandlerWrapScript(region, script, owner, body)
+    assert(not combat, "wrapping in combat")
+    region.IsMouseOver = region.IsMouseOver or function() return false end
+    region.IsShown = region.IsShown or function() return true end
+    wrapped[region] = wrapped[region] or {}
+    local fn = assert(load("return function(self, control) " .. body .. " end"))()
+    wrapped[region][script] = {owner = owner, run = function() fn(Handle(region), Handle(owner)) end}
+end
+assert(not ns.IsHoverKey("ESCAPE") and not ns.IsHoverKey("BUTTON6") and not ns.IsHoverKey("1\n/cast"))
+assert(ns.IsHoverKey("1") and ns.IsHoverKey("CTRL-SHIFT-F") and ns.IsHoverKey("NUMPAD1"))
+assert(ns.SaveHoverBinding("1", "spell", "Regrowth"))
+assert(ns.SaveHoverBinding("CTRL-F", "spell", "Healing Touch"))
+assert(not ns.SaveHoverBinding("2", "spell", "Made-up spell"))
+assert(next(wrapped) == nil, "default-off hovercasting must not wrap frames or replace keys")
+ns.SetOption("hovercast", true)
+local enter = assert(wrapped[PlayerFrame] and wrapped[PlayerFrame].OnEnter)
+enter.run()
+local binding = assert(overrides[enter.owner]["1"])
+local proxy = assert(proxies[binding.name])
+assert(proxy.attrs["*macrotext*"]:find("Regrowth", 1, true))
+assert(proxy.attrs["*macrotext*"]:find("help,nodead", 1, true) and proxy.attrs["*macrotext*"]:find("/stopspelltarget", 1, true))
+assert(not proxy.attrs.checkselfcast and not proxy.attrs.checkfocuscast)
+assert(proxy.attrs.useOnKeyDown and #proxy.clicks == 2, "one native secure action, using key-down filtering")
+assert(proxy.scripts.OnClick == nil and proxy.attrs["useparent-unit"])
+AggeHealBotDB.hoverBindings["SHIFT-2"] = {action = "spell", spell = "Healing Touch", spellID = 5185, rank = "Rank 1"}
+local ranked = ns.GetHoverBinding("SHIFT-2")
+assert(ranked.spell == "Healing Touch(Rank 1)")
+local probe = CreateFrame("Button", nil, PlayerFrame, "SecureActionButtonTemplate")
+assert(ns.ConfigureHoverAction(probe, PlayerFrame, ranked))
+assert(probe.attrs["*macrotext*"]:find("Healing Touch(Rank 1)", 1, true))
+assert(ns.ConfigureHoverAction(probe, PlayerFrame, {action = "spell", spell = "Rebirth", spellID = 20484}))
+assert(probe.attrs["*macrotext*"]:find("help,dead", 1, true) and not probe.attrs["*macrotext*"]:find("nodead", 1, true))
+assert(ns.ConfigureHoverAction(probe, PlayerFrame, {action = "target"}) and probe.attrs.type == "target")
+local oldRange = C_Spell.IsSpellInRange
+C_Spell.IsSpellInRange = function() return false end
+assert(ns.ConfigureHoverAction(probe, CompactRaidFrame1, {action = "spell", spell = "Regrowth", spellID = 8936}))
+assert(probe.attrs.type == "none", "range failure blocks the keyboard cast rather than falling back to self")
+C_Spell.IsSpellInRange = oldRange
+AggeHealBotDB.hoverBindings["SHIFT-2"] = nil
+local groupEnter = assert(wrapped[CompactRaidFrame1].OnEnter)
+combat = true
+wrapped[PlayerFrame].OnLeave.run()
+assert(overrides[enter.owner] == nil)
+groupEnter.run()
+assert(overrides[groupEnter.owner]["CTRL-F"])
+wrapped[CompactRaidFrame1].OnHide.run()
+assert(overrides[groupEnter.owner] == nil, "hidden frames must restore normal keys in combat")
+enter.run()
+local previous = proxy.attrs["*macrotext*"]
+assert(ns.SaveHoverBinding("1", "spell", "Healing Touch"))
+assert(proxy.attrs["*macrotext*"] == previous, "combat edits must be deferred")
+ns.SetOption("hovercast", false)
+assert(overrides[enter.owner], "combat toggle waits for safe refresh")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(overrides[enter.owner] == nil and not enter.owner.attrs.enabled)
+enter.run()
+assert(overrides[enter.owner] == nil)
+ns.SetOption("hovercast", true)
+enter.run()
+assert(proxy.attrs["*macrotext*"]:find("Healing Touch", 1, true))
+-- Keyboard settings use the same spell/rank picker, independent of mouse binds.
+ns.ShowOptions()
+local settings = AggeHealBotSettings
+settings.bindingMode.scripts.OnClick()
+assert(settings.hoverEditor and settings.hoverKeys.shown and not settings.mouse.shown)
+local input = settings.hoverKeys.input
+local beforeShift, beforeCtrl, beforeAlt = IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
+IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = function() return false end, function() return false end, function() return false end
+input.scripts.OnKeyDown(input, "2")
+assert(AggeHealBotSpellPicker.button == "2" and AggeHealBotDB.hoverBindings["2"])
+assert(AggeHealBotSpellPicker:Save("spell", "Rejuvenation"))
+settings.scripts.OnEvent()
+assert(AggeHealBotDB.hoverBindings["2"].spell == "Rejuvenation")
+AggeHealBotSpellPicker.reset.scripts.OnClick()
+assert(AggeHealBotDB.hoverBindings["2"] == nil)
+settings.bindingMode.scripts.OnClick()
+assert(not settings.hoverEditor and settings.mouse.shown)
+settings.bindingMode.scripts.OnClick()
+assert(settings.hoverEditor)
+ns.SetOption("hovercast", false)
+settings.scripts.OnEvent()
+assert(not settings.bindingMode.shown and not settings.hoverKeys.shown and settings.mouse.shown)
+assert(type(AggeHealBotSpellPicker.button) == "number" and AggeHealBotDB.hoverBindings["1"], "disabling hovercast returns to mouse editing without losing saved keys")
+ns.SetOption("hovercast", true)
+settings.scripts.OnEvent()
+assert(settings.bindingMode.shown)
+IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = beforeShift, beforeCtrl, beforeAlt
+ns.ResetBindings()
+assert(#ns.GetHoverKeys() == 0 and overrides[enter.owner] == nil)
+ns.ResetOptions()
+assert(not AggeHealBotDB.hovercast)
+CreateFrame = beforeCreate
+print("PASS: default-off keyboard hovercasting, secure combat enter/leave/hide, override cleanup, separate spell picker, key validation, deferred edits and resets")
+end)()
+
+-- Self-only priest buffs are watched by default, including aliases of yourself.
+;(function()
+combat = false
+local beforeClass, beforeBook, beforeUnit = UnitClass, C_SpellBook.GetSpellBookItemInfo, UnitIsUnit
+local beforePlayer = UnitIsPlayer
+UnitIsPlayer = function() return true end
+UnitClass = function() return "Priest", "PRIEST" end
+spellNames[588], known[588] = "Inner Fire", "Inner Fire"
+spellNames[2061], known[2061] = "Flash Heal", "Flash Heal"
+C_SpellBook.GetSpellBookItemInfo = function(slot) return ({ {spellID = 2061}, {spellID = 588} })[slot] end
+ns.ResetOptions()
+ns.ResetBindings()
+AggeHealBotDB.buffWatch = {class = "PRIEST", order = {1243, 14752, 976}, disabled = {}}
+local beforeAuras = auras.player
+local function PriestAuras(inner)
+    local result = {}
+    for _, group in ipairs(ns.buffs.PRIEST) do
+        if group[1] ~= 588 then
+            local ranks = ns.buffRanks[group[1]].ranks
+            result[#result + 1] = {name = spellNames[group[1]], spellId = ranks[#ranks]}
+        end
+    end
+    if inner then result[#result + 1] = {name = "Inner Fire", spellId = 588} end
+    return result
+end
+auras.player = PriestAuras()
+UnitIsUnit = function(a, b) if b == "player" and a == "target" then return true end; return beforeUnit(a, b) end
+event("PLAYER_LOGIN")
+assert(PlayerFrame.attrs.spell1 == "Inner Fire", "new self buff defaults enabled even with an existing saved watcher order: " .. tostring(PlayerFrame.attrs.spell1))
+local found
+for _, entry in ipairs(ns.GetBuffWatchList()) do if entry.id == 588 then found = entry end end
+assert(found and found.enabled and found.selfOnly and found.learned)
+auras.player = PriestAuras(true)
+event("UNIT_AURA", "player")
+assert(PlayerFrame.attrs.spell1 == "Flash Heal", "active Inner Fire suppresses its watch")
+auras.target = PriestAuras()
+event("UNIT_AURA", "target")
+assert(ns.targetButton.attrs.spell1 == "Inner Fire", "targeting yourself also offers self-only buffs")
+UnitIsUnit = beforeUnit
+event("UNIT_AURA", "target")
+assert(ns.targetButton.attrs.spell1 ~= "Inner Fire", "never offer Inner Fire on another player")
+auras.player = PriestAuras()
+assert(ns.SetBuffWatchEnabled(588, false))
+assert(PlayerFrame.attrs.spell1 == "Flash Heal")
+ns.ResetWatchers()
+assert(PlayerFrame.attrs.spell1 == "Inner Fire", "reset restores default-enabled Inner Fire")
+known[588] = nil
+C_SpellBook.GetSpellBookItemInfo = function(slot) return slot == 1 and {spellID = 2061} or nil end
+event("SPELLS_CHANGED")
+assert(PlayerFrame.attrs.spell1 == "Flash Heal", "unlearned Inner Fire must not take left click")
+UnitClass, C_SpellBook.GetSpellBookItemInfo, UnitIsUnit = beforeClass, beforeBook, beforeUnit
+UnitIsPlayer = beforePlayer
+auras.player = beforeAuras
+ns.ResetOptions()
+event("PLAYER_LOGIN")
+print("PASS: default priest Inner Fire, existing saved orders, self aliases, aura suppression, teammate exclusion, enable/reset and unlearned safety")
 end)()

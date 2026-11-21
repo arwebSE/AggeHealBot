@@ -69,7 +69,7 @@ A.presets = {
 
 A.buffs = {
     DRUID = {{1126, 21849}, {467}},
-    PRIEST = {{1243, 21562}, {14752, 27681}, {976, 27683}},
+    PRIEST = {{1243, 21562}, {14752, 27681}, {976, 27683}, {588, selfOnly = true}},
 }
 
 -- Ascending strength, not numeric spell-ID order. Group buffs share the

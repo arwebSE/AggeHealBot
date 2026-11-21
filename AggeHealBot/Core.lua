@@ -22,7 +22,7 @@ local optionDefaults = {
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
     showTooltip = true, replaceBlizzardTooltip = false,
-    watchPets = true,
+    watchPets = true, hovercast = false,
     buffsBeforeCures = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
@@ -377,7 +377,8 @@ local function MissingBuff(unit)
     local groups = class == "PALADIN" and PaladinBuffGroups(unit) or BuffWatchGroups()
     for _, group in ipairs(groups) do
         local definition = A.buffRanks[group[1]]
-        local name = Resolve({group[1]}) or (definition and Resolve(definition.ranks))
+        local allowed = not group.selfOnly or ReadFlag(UnitIsUnit, unit, "player") == true
+        local name = allowed and (Resolve({group[1]}) or (definition and Resolve(definition.ranks)))
         local exists = name and BuffSatisfied(group, definition, LearnedBuffRank(definition, name), auras)
         if name and not exists and not RejectedBuffStillActive(guid, name, evidence) then return name, group[1], evidence end
     end
@@ -523,6 +524,33 @@ local function MenuButton(frame)
         state.menuButton:SetAttribute("useparent-unitsuffix", true)
     else state.menuButton:SetAttribute("unit", Unit(frame)) end
     return state.menuButton
+end
+function A.ConfigureHoverAction(button, frame, binding)
+    local action, spell = binding.action, binding.spell
+    button:SetAttribute("*type*", nil)
+    button:SetAttribute("*macrotext*", nil)
+    button:SetAttribute("*clickbutton*", nil)
+    UnregisterAttributeDriver(button, "type")
+    if action == "spell" then
+        if not spell then button:SetAttribute("type", "none"); return false end
+        local resurrection = false
+        for _, ids in ipairs({A.resurrections[class] or {}, A.combatResurrections[class] or {}}) do
+            for _, id in ipairs(ids) do if id == binding.spellID then resurrection = true end end
+        end
+        local target = TargetUnit(frame) or "mouseover"
+        local macro = resurrection and ("/cast [@" .. target .. ",help,dead] " .. spell .. CastEnding(target))
+            or CastMacro(spell, nil, TargetUnit(frame))
+        button:SetAttribute("*macrotext*", macro)
+        RegisterAttributeDriver(button, "type", "[combat] macro; " .. (HealOutOfRange(spell, Unit(frame)) and "none" or "macro"))
+    elseif action == "settings" or action == "togglemenu" then
+        button:SetAttribute("type", "click")
+        button:SetAttribute("*clickbutton*", action == "settings" and A.settingsButton or MenuButton(frame))
+    elseif action == "target" then
+        button:SetAttribute("type", "target")
+    elseif action == "assist" then
+        button:SetAttribute("type", "assist")
+    else button:SetAttribute("type", "none"); return false end
+    return true
 end
 local function BindingAction(frame, binding)
     if (frame == PlayerFrame or (TargetUnit(frame) and (not A.externalFrames[frame] or A.externalFrames[frame].option))) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
@@ -702,6 +730,15 @@ local function ShowFrameTooltip(frame)
             tooltip:AddDoubleLine(b.label, value .. (action == "spell" and not b.spell and " (not learned)" or ""), 1, 1, 1, 0.6, 0.9, 0.7)
         end
     end
+    if AggeHealBotDB.hovercast and A.GetHoverKeys then
+        for _, key in ipairs(A.GetHoverKeys()) do
+            local binding = A.GetHoverBinding(key)
+            if binding.action ~= "none" then
+                local value = binding.spell or binding.expected or A.actionLabels[binding.action]
+                tooltip:AddDoubleLine(key, value .. (binding.action == "spell" and not binding.spell and " (not learned)" or ""), 1, 0.82, 0.35, 0.6, 0.9, 0.7)
+            end
+        end
+    end
     tooltip:Show()
     SuppressNativeTooltip()
     if heading and levelText then
@@ -755,6 +792,7 @@ local function RefreshTooltip()
     if hoveredFrame and frames[hoveredFrame] then ShowFrameTooltip(hoveredFrame) end
 end
 local function HookHover(frame, region)
+    if A.RegisterHoverRegion then A.RegisterHoverRegion(frame, region) end
     if not region or not region.HookScript or hoverHooks[region] then return end
     hoverHooks[region] = true
     region:HookScript("OnEnter", function(self)
@@ -950,6 +988,7 @@ Apply = function(frame)
     -- Use the same decision as the secure click binding, never a separate scan.
     A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and buff or nil, buffID,
         frames[frame].watchKind, buff and A.CastProblem(buff, unit))
+    if A.ApplyHoverCast then A.ApplyHoverCast(frame) end
 end
 local function Register(frame)
     -- Compact frame hooks also receive forbidden nameplate children.
@@ -979,6 +1018,7 @@ end
 local function RestoreFrame(frame)
     local state = frame and frames[frame]
     if not state then return end
+    if A.StopHoverCast then A.StopHoverCast(frame) end
     UnregisterAttributeDriver(frame, "spell1")
     UnregisterAttributeDriver(frame, "type1")
     UnregisterAttributeDriver(frame, "ahb-resurrection")
@@ -1106,6 +1146,7 @@ Queue = function()
     queued = true
     C_Timer.After(0, function() queued = false; refresh() end)
 end
+A.RefreshHoverBindings = function() Queue() end
 A.GetBindings = function() return bindings end
 A.GetPlayerClass = function() return class end
 A.IsSpellLearned = IsLearned
@@ -1125,6 +1166,7 @@ local function GetWatchList(kind)
             list[#list + 1] = {id = id, name = name,
                 icon = info and info.iconID or 134400, learned = learnedName ~= nil,
                 enabled = not (saved and type(saved.disabled) == "table" and saved.disabled[id]),
+                selfOnly = group.selfOnly,
                 kinds = kind == "cures" and table.concat(group, ", ", 2) or nil}
         end
     end
@@ -1351,6 +1393,7 @@ A.SetOption = function(key, value)
 end
 A.ResetBindings = function()
     wipe(AggeHealBotDB.bindings)
+    AggeHealBotDB.hoverBindings = nil
     if not InCombatLockdown() then BuildBindings() end
     Queue()
 end

@@ -3,6 +3,8 @@ local panel, picker, selected, selectedButton = nil, nil, 1, 1
 local optionsCanvas, optionsCategory
 local toolsPane
 local buffPane
+local selectedHoverKey
+local OpenPicker
 local FitEditor
 local categoryLabels = {heals = "Heal", buffs = "Buff", utility = "Utility", other = "Other", actions = "Action"}
 local categoryColors = {heals = {0.5, 1, 0.7}, buffs = {0.5, 0.75, 1}, utility = {0.8, 0.6, 1}, other = {0.6, 0.62, 0.66}, actions = {0.85, 0.75, 0.5}}
@@ -195,6 +197,7 @@ local function SelectPage(page)
     end
 end
 local function Current(prefix, button)
+    if type(button) == "string" then return A.GetHoverBinding(button) end
     local custom = AggeHealBotDB.bindings[prefix .. button]
     if custom then return custom end
     for _, b in ipairs(A.GetBindings()) do
@@ -204,6 +207,10 @@ local function Current(prefix, button)
 end
 local function Update()
     if not panel then return end
+    if not AggeHealBotDB.hovercast and panel.hoverEditor then
+        OpenPicker(selectedButton)
+        return
+    end
     panel.buffs:SetChecked(AggeHealBotDB.smartBuffs)
     panel.cures:SetChecked(AggeHealBotDB.cureWatch)
     if panel.combatCures then
@@ -218,6 +225,7 @@ local function Update()
     panel.minimap:SetChecked(AggeHealBotDB.showMinimap)
     panel.targetOnCast:SetChecked(AggeHealBotDB.targetOnCast)
     panel.showTooltip:SetChecked(AggeHealBotDB.showTooltip)
+    panel.hovercast:SetChecked(AggeHealBotDB.hovercast)
     panel.replaceTooltip:SetChecked(AggeHealBotDB.replaceBlizzardTooltip)
     panel.replaceTooltip:SetEnabled(AggeHealBotDB.showTooltip)
     panel.replaceTooltip:SetAlpha(AggeHealBotDB.showTooltip and 1 or 0.45)
@@ -235,6 +243,15 @@ local function Update()
     end
     local prefix = A.modifiers[selected].prefix
     panel.identifier:Render(A.GetMouseButtons(), prefix, selectedButton, Current)
+    local keyboard = panel.hoverEditor
+    panel.mouse:SetShown(not keyboard)
+    panel.modifierTitle:SetShown(not keyboard)
+    for _, tab in ipairs(panel.tabs) do tab:SetShown(not keyboard) end
+    panel.hoverKeys:SetShown(keyboard)
+    panel.bindingMode:SetText(keyboard and "Mouse bindings" or "Keyboard bindings")
+    panel.bindingMode:SetShown(AggeHealBotDB.hovercast)
+    panel.hoverKeys:Render(selectedHoverKey, Value)
+    if keyboard and not (AggeHealBotDB.hoverBindings or {})[selectedHoverKey] and picker then picker:Hide() end
     local icon, alpha = A.GetBindingVisual(Current(prefix, selectedButton))
     panel.mouse:SetCaption(A.buttons[selectedButton], Value(Current(prefix, selectedButton)), icon, alpha)
     local extraHeight = panel.identifier.hasExtras and 62 or 0
@@ -254,11 +271,13 @@ local function Update()
     if toolsPane and toolsPane:IsShown() then toolsPane:Render() end
     if buffPane and buffPane:IsShown() then buffPane:Render() end
 end
-local function OpenPicker(button)
+OpenPicker = function(button)
+    if type(button) == "string" and not AggeHealBotDB.hovercast then button = selectedButton end
     SelectPage("home")
     if buffPane then buffPane:Hide() end
     if toolsPane then toolsPane:Hide() end
-    selectedButton = button
+    if type(button) == "string" then selectedHoverKey = button; panel.hoverEditor = true
+    else selectedButton = button; selectedHoverKey = nil; panel.hoverEditor = false end
     if not picker then
         -- Inline browser, not a second window covering the bindings.
         picker = CreateFrame("Frame", "AggeHealBotSpellPicker", panel.home)
@@ -320,7 +339,7 @@ local function OpenPicker(button)
         for i = 1, 9 do
             local row = Button(picker, "", 384, 0, -132 - (i - 1) * 31, function(self)
                 local choice = self.choice
-                if choice and A.SaveBinding(picker.prefix, picker.button, choice.action, choice.spell, choice.spellID, choice.rank) then
+                if choice and picker:Save(choice.action, choice.spell, choice.spellID, choice.rank) then
                     Update()
                     picker:Render()
                 end
@@ -364,12 +383,16 @@ local function OpenPicker(button)
         Button(picker, "< Previous", 98, 0, -419, function() Page(-1) end)
         Button(picker, "Next >", 98, 286, -419, function() Page(1) end)
         local function Assign(action)
-            A.SaveBinding(picker.prefix, picker.button, action)
+            picker:Save(action)
             Update()
             picker:Render()
         end
-        Button(picker, "Reset this click", 186, 0, -453, function() Assign("default") end)
-        Button(picker, "Disable this click", 186, 198, -453, function() Assign("none") end)
+        picker.reset = Button(picker, "Reset this click", 186, 0, -453, function() Assign("default") end)
+        picker.disable = Button(picker, "Disable this click", 186, 198, -453, function() Assign("none") end)
+        function picker:Save(action, spell, spellID, rank)
+            if type(self.button) == "string" then return A.SaveHoverBinding(self.button, action, spell, spellID, rank) end
+            return A.SaveBinding(self.prefix, self.button, action, spell, spellID, rank)
+        end
         picker:EnableMouseWheel(true)
         picker:SetScript("OnMouseWheel", function(_, delta) Page(-delta) end)
         function picker:Render()
@@ -424,7 +447,10 @@ local function OpenPicker(button)
         picker:SetScript("OnHide", function() picker.search:ClearFocus() end)
     end
     picker.prefix, picker.button = A.modifiers[selected].prefix, button
-    picker.heading:SetText("Assign: " .. A.modifiers[selected].label .. A.buttons[button])
+    local keyboard = type(button) == "string"
+    picker.heading:SetText("Assign: " .. (keyboard and button or A.modifiers[selected].label .. A.buttons[button]))
+    picker.reset:SetText(keyboard and "Remove this key" or "Reset this click")
+    picker.disable:SetText(keyboard and "Disable this key" or "Disable this click")
     picker.choices = A.GetSpellChoices(AggeHealBotDB.showUnlearned, AggeHealBotDB.showAllRanks)
     picker.actions = {}
     local actionIcons = {target = 132212, assist = 132179, togglemenu = 134331, settings = 136243, none = 132156}
@@ -656,6 +682,7 @@ local function OpenBuffs()
                 row.icon:SetAlpha(entry.enabled and entry.learned and 1 or 0.4)
                 row.name:SetText(entry.name)
                 local note = not entry.enabled and "Off" or entry.learned and ("Priority " .. index) or "Not learned yet"
+                if entry.selfOnly then note = note .. " - Self only" end
                 if kind == "cures" and entry.enabled and entry.learned then
                     note = (AggeHealBotDB.cureWatchRules and ("Priority " .. index) or "Default") .. " - " .. (entry.kinds or "")
                 end
@@ -876,7 +903,19 @@ function A.ShowOptions(host)
             "Hide Blizzard's group-control side panel and tab while outside a raid, including raid-style party frames. Party unit frames stay visible. On by default.", false, panel.advanced)
         panel.paladinDebug = Check("showPaladinDebug", "Show Paladin tab (debug)", 18, -402,
             "Show and allow editing the Paladin settings tab on other classes for testing. This does not grant paladin spells or enable paladin buff watching on another class. Off by default.", false, panel.advanced)
-        Text(panel.home, "MODIFIERS", 24, -156, "GameFontHighlightSmall")
+        panel.hovercast = Check("hovercast", "Hovercast", 182, -109,
+            "Cast with keyboard keys while hovering a supported unit frame. Configure keys with Keyboard bindings below. Keys temporarily override their normal action only over these frames. Off by default. Changes made during combat apply after combat.")
+        panel.modifierTitle = Text(panel.home, "MODIFIERS", 24, -156, "GameFontHighlightSmall")
+        panel.bindingMode = Button(panel.home, "Keyboard bindings", 139, 200, -147, function()
+            if not AggeHealBotDB.hovercast then return end
+            panel.hoverEditor = not panel.hoverEditor
+            panel.identifier:Stop()
+            if panel.hoverEditor then
+                local keys = A.GetHoverKeys()
+                if keys[1] then OpenPicker((AggeHealBotDB.hoverBindings or {})[selectedHoverKey] and selectedHoverKey or keys[1]) else Update() end
+            else OpenPicker(selectedButton) end
+        end)
+        panel.hoverKeys = A.CreateHoverKeyEditor(panel.home, Button, Text, OpenPicker, Update)
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do

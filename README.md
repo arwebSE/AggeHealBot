@@ -7,6 +7,7 @@ Click-to-heal on Blizzard and supported X-Perl frames in **WoW Forever**.
 <img src="https://media.forgecdn.net/attachments/2170/4/chatgpt-image-nov-8-2026-11_53_36-pm-png.png" width="340" alt="AggeHealBot missing-buff reminder">
 
 - Custom mouse bindings with Shift, Ctrl and Alt.
+- Optional keyboard hovercasting, off by default.
 - Healing presets for druid, priest, paladin and shaman.
 - Missing-buff reminders outside combat.
 
@@ -130,3 +131,5 @@ These tests use a mocked WoW runtime. Secure execution and appearance must also 
 
 
 [MIT](LICENSE). Binding choices were inspired by HealBot Continued; the implementation is independent. Blizzard UI artwork is referenced from the game client and is not redistributed in this repository. This project is not affiliated with Blizzard Entertainment or HealBot Continued.
+
+**Keyboard hovercasting:** In Home, enable **Hovercast**, then open **Keyboard bindings**. Click the key field, press a key (with optional Shift/Ctrl/Alt), and choose a spell or action from the normal picker. Show all ranks also works for keyboard bindings. Keys temporarily override their normal action only while hovering a supported frame, including its health/mana bars. Moving away or hiding the frame restores normal bindings. Keyboard spells cast their assigned spell; automatic watcher priority remains on left click. Configuration changes made in combat apply after combat. Reset all bindings also clears keyboard shortcuts.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-11-21
+
+- Watch Inner Fire by default for priests, only on frames representing the priest. Keep its enable/priority controls in Watchers and label it Self only.
+- Add optional keyboard hovercasting in Home, default off, with an independent keyboard binding editor and the existing spell/rank picker. Show keyboard binding controls only while Hovercast is enabled; preserve saved keys when disabled.
+- Activate temporary shortcuts only over supported frames and resource bars; restore normal keys on leave/hide, use secure handlers in combat, and defer configuration edits until combat ends.
+
 ## 1.1.9 — 2026-11-19
 
 - Fix forbidden-nameplate discovery, X-Perl pet unit/suffix inheritance and combat-safe mouse-button identification.
