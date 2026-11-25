@@ -23,13 +23,16 @@ local optionDefaults = {
     showAllRanks = false, showMinimap = true, targetOnCast = false,
     showTooltip = true, replaceBlizzardTooltip = false,
     watchPets = true, hovercast = false,
-    buffsBeforeCures = false,
+    buffsBeforeCures = false, watcherModifiers = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
 local function ReadFlag(fn, ...)
     if not fn then return end
     local ok, value = pcall(fn, ...)
     if ok and not secret(value) then return value end
+end
+local function WatcherVisible()
+    return AggeHealBotDB.watcherModifiers or not (IsModifierKeyDown and IsModifierKeyDown())
 end
 local function Print(s) print("|cff80e5b0AggeHealBot:|r " .. s) end
 local function SpellName(id)
@@ -368,6 +371,59 @@ local function BuffWatchGroups(includeDisabled, kind)
     for _, group in ipairs(defaults) do Add(group[1]) end
     return result
 end
+local function BuffTargetRule(id)
+    local saved = AggeHealBotDB.buffWatch
+    return type(saved) == "table" and saved.class == class and type(saved.targets) == "table" and saved.targets[id] or nil
+end
+A.buffTargetRoles = {
+    {"healers", "Healers"}, {"tanks", "Tanks"}, {"dps", "DPS"},
+}
+A.buffTargetGroups = {
+    {"casters", "Casters"}, {"melee", "Melee"},
+    {"mana", "Mana users"}, {"rage", "Rage users"}, {"energy", "Energy users"},
+}
+A.buffTargetClasses = {
+    casters = {"MAGE", "PRIEST", "SHAMAN", "WARLOCK"},
+    melee = {"PALADIN", "ROGUE", "WARRIOR"},
+}
+A.buffTargetDruidModes = {casters = "casters+druid", melee = "melee+druid"}
+local druidModeBase = {["casters+druid"] = "casters", ["melee+druid"] = "melee"}
+local powerGroups = {mana = 0, rage = 1, energy = 3}
+local roleGroups = {healers = "HEALER", tanks = "TANK", dps = "DAMAGER"}
+local function IsBuffTargetMode(mode)
+    if mode == "everyone" or mode == "self" or mode == "selected" then return true end
+    if A.buffTargetClasses[mode] or druidModeBase[mode] or powerGroups[mode] ~= nil or roleGroups[mode] then return true end
+    for _, token in ipairs(A.paladinClasses) do
+        if mode == "class:" .. token then return true end
+    end
+    return false
+end
+local function BuffTargetAllowed(unit, group)
+    local rule = BuffTargetRule(group[1])
+    if group.selfOnly or (rule and rule.mode == "self") then return ReadFlag(UnitIsUnit, unit, "player") == true end
+    if rule and rule.mode == "selected" then
+        local key = ReadFlag(UnitIsUnit, unit, "player") == true and "self" or ReadFlag(UnitGUID, unit)
+        return type(key) == "string" and type(rule.players) == "table" and rule.players[key] ~= nil
+    end
+    local mode = rule and rule.mode
+    if not mode or mode == "everyone" then return true end
+    local role = roleGroups[mode]
+    if role then return ReadFlag(UnitGroupRolesAssigned, unit) == role end
+    local power = powerGroups[mode]
+    if power then return ReadFlag(UnitPowerType, unit) == power end
+    local ok, _, token = pcall(UnitClass, unit)
+    if not ok or secret(token) or type(token) ~= "string" then return false end
+    local baseMode = druidModeBase[mode]
+    if baseMode and token == "DRUID" then return true end
+    local classes = A.buffTargetClasses[baseMode or mode]
+    if classes then
+        for _, memberClass in ipairs(classes) do
+            if token == memberClass then return true end
+        end
+        return false
+    end
+    return mode == "class:" .. token
+end
 local function MissingBuff(unit)
     if not AggeHealBotDB.smartBuffs or not unit or ReadFlag(UnitExists, unit) ~= true
         or ReadFlag(UnitCanAssist, "player", unit) ~= true or ReadFlag(UnitIsDeadOrGhost, unit) ~= false then return end
@@ -377,7 +433,7 @@ local function MissingBuff(unit)
     local groups = class == "PALADIN" and PaladinBuffGroups(unit) or BuffWatchGroups()
     for _, group in ipairs(groups) do
         local definition = A.buffRanks[group[1]]
-        local allowed = not group.selfOnly or ReadFlag(UnitIsUnit, unit, "player") == true
+        local allowed = BuffTargetAllowed(unit, group)
         local name = allowed and (Resolve({group[1]}) or (definition and Resolve(definition.ranks)))
         local exists = name and BuffSatisfied(group, definition, LearnedBuffRank(definition, name), auras)
         if name and not exists and not RejectedBuffStillActive(guid, name, evidence) then return name, group[1], evidence end
@@ -443,7 +499,7 @@ local function UpdateCombatWatch(frame)
     end
     state.combatCureSpell = kind == "cure" and spell or nil
     state.combatCureDebuff = debuff
-    local visible = not (IsModifierKeyDown and IsModifierKeyDown())
+    local visible = WatcherVisible()
     A.UpdateBuffIndicator(frame, visible and spell or nil, id, kind)
 end
 local function HealOutOfRange(spell, unit)
@@ -555,6 +611,23 @@ end
 local function BindingAction(frame, binding)
     if (frame == PlayerFrame or (TargetUnit(frame) and (not A.externalFrames[frame] or A.externalFrames[frame].option))) and binding.prefix == "" and binding.button == 2 and AggeHealBotDB.rightClickMenu then return "togglemenu" end
     return binding.action
+end
+local function FindBuffShortcut(frame, spell)
+    local function Matches(binding)
+        return binding.spell and (binding.spell == spell
+            or (binding.rank and binding.spell == spell .. "(" .. binding.rank .. ")"))
+    end
+    for _, binding in ipairs(bindings) do
+        if BindingAction(frame, binding) == "spell" and Matches(binding) then
+            return binding.label, binding.spell
+        end
+    end
+    if AggeHealBotDB.hovercast and A.GetHoverKeys then
+        for _, key in ipairs(A.GetHoverKeys()) do
+            local binding = A.GetHoverBinding(key)
+            if binding.action == "spell" and Matches(binding) then return key, binding.spell end
+        end
+    end
 end
 local function SuppressNativeTooltip()
     local frame = hoveredFrame
@@ -710,12 +783,16 @@ local function ShowFrameTooltip(frame)
             if binding.spell == state.combatCureSpell and BindingAction(frame, binding) == "spell" then shortcut = binding.label; break end
         end
         tooltip:AddLine(shortcut and ("Cast with " .. shortcut) or "Bind this cure in /ahb to cast it in combat.", 1, 1, 1)
+    elseif not InCombatLockdown() and state.buffShortcut and WatcherVisible() then
+        tooltip:AddDoubleLine("Missing: " .. state.boundBuff, state.buffShortcut, 0.65, 1, 0.65, 1, 0.82, 0.35)
     elseif prefix == "" and not InCombatLockdown() and state.nextBuff then
         tooltip:AddLine((state.resurrection and "Resurrect with left click: " or state.cure and "Cure with left click: " or "Next left click: ") .. state.nextBuff, 0.65, 1, 0.65)
         if state.cure then tooltip:AddLine(state.cure, 1, 0.6, 0.5) end
     elseif prefix == "" and not InCombatLockdown() and state.blockedBuff then
         tooltip:AddLine(state.blockedBuff .. ": " .. (A.CastProblem(state.blockedBuff, unit) or "Range unavailable"), 1, 0.4, 0.3)
         tooltip:AddLine("Left click blocked until range is confirmed.", 1, 0.7, 0.4)
+    elseif prefix ~= "" and AggeHealBotDB.watcherModifiers and not InCombatLockdown() and state.nextBuff then
+        tooltip:AddLine("Watcher: " .. state.nextBuff, 0.65, 1, 0.65)
     elseif prefix == "" and not InCombatLockdown() and state.healingFirst then
         tooltip:AddLine("Healing first: below 90% health.", 0.65, 1, 0.65)
     end
@@ -818,8 +895,10 @@ end
 local function RefreshHint(frame)
     local state = frames[frame]
     if not state or InCombatLockdown() then return end
-    A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and state.nextBuff or nil,
-        state.nextBuffID, state.watchKind, state.nextBuff and A.CastProblem(state.nextBuff, Unit(frame)))
+    local reminder = state.boundBuff or state.nextBuff
+    local spell = state.boundBuffSpell or reminder
+    A.UpdateBuffIndicator(frame, WatcherVisible() and reminder or nil,
+        state.nextBuffID, state.watchKind, spell and A.CastProblem(spell, Unit(frame)))
 end
 Apply = function(frame)
     if not ready or InCombatLockdown() then return end
@@ -938,6 +1017,15 @@ Apply = function(frame)
     else
         UnregisterAttributeDriver(frame, "ahb-resurrection")
     end
+    local state = frames[frame]
+    state.boundBuff, state.boundBuffSpell, state.buffShortcut = nil, nil, nil
+    if AggeHealBotDB.watcherModifiers and buff and not res and not cure then
+        local shortcut, spell = FindBuffShortcut(frame, buff)
+        if shortcut then
+            state.boundBuff, state.boundBuffSpell, state.buffShortcut = buff, spell, shortcut
+            buff = nil
+        end
+    end
     frames[frame].buffEvidence = evidence
     local blocked = buff and not BuffInRange(buff, Unit(frame)) or false
     frames[frame].candidateBuff = buff
@@ -985,9 +1073,7 @@ Apply = function(frame)
     frames[frame].nextBuff = buff
     frames[frame].nextBuffID = buffID
     frames[frame].watchKind = res and "resurrection" or cure and "cure" or nil
-    -- Use the same decision as the secure click binding, never a separate scan.
-    A.UpdateBuffIndicator(frame, not (IsModifierKeyDown and IsModifierKeyDown()) and buff or nil, buffID,
-        frames[frame].watchKind, buff and A.CastProblem(buff, unit))
+    RefreshHint(frame)
     if A.ApplyHoverCast then A.ApplyHoverCast(frame) end
 end
 local function Register(frame)
@@ -1167,6 +1253,7 @@ local function GetWatchList(kind)
                 icon = info and info.iconID or 134400, learned = learnedName ~= nil,
                 enabled = not (saved and type(saved.disabled) == "table" and saved.disabled[id]),
                 selfOnly = group.selfOnly,
+                targetMode = group.selfOnly and "self" or (BuffTargetRule(id) and BuffTargetRule(id).mode) or "everyone",
                 kinds = kind == "cures" and table.concat(group, ", ", 2) or nil}
         end
     end
@@ -1196,6 +1283,59 @@ function A.SetBuffWatchEnabled(id, enabled, kind)
     Queue()
     return true
 end
+local function SaveBuffTargetMode(id, mode, players)
+    if not IsBuffTargetMode(mode) then return false end
+    for _, group in ipairs(A.buffs[class] or {}) do if group[1] == id and group.selfOnly then return false end end
+    local saved = EditableBuffWatch(id)
+    if not saved then return false end
+    saved.targets = type(saved.targets) == "table" and saved.targets or {}
+    local old = saved.targets[id]
+    saved.targets[id] = {mode = mode, players = players or (old and old.players) or {self = "Me"}}
+    Queue()
+    return true
+end
+function A.SetBuffTargetMode(id, mode)
+    return SaveBuffTargetMode(id, mode)
+end
+function A.SaveBuffRecipients(id, recipients)
+    local players = {}
+    for _, recipient in ipairs(recipients) do
+        if recipient.selected then
+            players[recipient.key] = recipient.name:gsub(" %(not in group%)$", "")
+        end
+    end
+    return SaveBuffTargetMode(id, "selected", players)
+end
+function A.GetBuffRecipients(id)
+    local rule = BuffTargetRule(id)
+    local selected = rule and type(rule.players) == "table" and rule.players or {self = "Me"}
+    local list, seen = {{key = "self", name = "Me", selected = selected.self ~= nil}}, {}
+    local function Add(unit)
+        if ReadFlag(UnitExists, unit) ~= true or ReadFlag(UnitIsPlayer, unit) ~= true or ReadFlag(UnitIsUnit, unit, "player") ~= false then return end
+        local guid, name = ReadFlag(UnitGUID, unit), ReadFlag(UnitName, unit)
+        if type(guid) ~= "string" or type(name) ~= "string" or seen[guid] then return end
+        seen[guid] = true
+        list[#list + 1] = {key = guid, name = name, selected = selected[guid] ~= nil}
+    end
+    if ReadFlag(IsInRaid) == true then for i = 1, 40 do Add("raid" .. i) end
+    else for i = 1, 4 do Add("party" .. i) end end
+    for guid, name in pairs(selected) do
+        if guid ~= "self" and not seen[guid] and type(guid) == "string" and type(name) == "string" then
+            list[#list + 1] = {key = guid, name = name .. " (not in group)", selected = true}
+        end
+    end
+    table.sort(list, function(a, b) if a.key == b.key then return false elseif a.key == "self" then return true elseif b.key == "self" then return false end; return a.name < b.name end)
+    return list
+end
+function A.SetBuffRecipient(id, key, enabled)
+    local label
+    for _, entry in ipairs(A.GetBuffRecipients(id)) do if entry.key == key then label = entry.name:gsub(" %(not in group%)$", ""); break end end
+    if not label or not A.SetBuffTargetMode(id, "selected") then return false end
+    local rule = BuffTargetRule(id)
+    rule.players[key] = enabled and label or nil
+    Queue()
+    return true
+end
 function A.MoveBuffWatch(id, direction, kind)
     if direction ~= -1 and direction ~= 1 then return false end
     local saved = EditableBuffWatch(id, kind)
@@ -1220,6 +1360,7 @@ end
 function A.ResetWatchers()
     AggeHealBotDB.buffWatch, AggeHealBotDB.cureWatchRules = nil, nil
     AggeHealBotDB.buffsBeforeCures = false
+    AggeHealBotDB.watcherModifiers = false
     AggeHealBotDB.resurrectionWatch, AggeHealBotDB.combatResurrection = true, false
     AggeHealBotDB.resurrectionRanks = nil
     AggeHealBotDB.watchPets = true
@@ -1452,7 +1593,7 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_ROLES_ASSIGNED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_DISPLAYPOWER", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
@@ -1514,6 +1655,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spell
             if hoveredFrame then ShowFrameTooltip(hoveredFrame) end
             return
         end
+        if event == "UNIT_DISPLAYPOWER" then Queue(); return end
         if event == "UNIT_POWER_UPDATE" or event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_COOLDOWN" then
             if InCombatLockdown() or (event == "UNIT_POWER_UPDATE" and (secret(arg) or arg ~= "player")) then return end
             -- Mana and cooldown ticks update hints, not aura scans or secure

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 — 2026-11-26
+
+- Choose who each buff watches. Use Everyone, Only me, a saved player checklist, a class, an assigned role, or a resource group. Casters and Melee each offer an Include Druids option.
+- Move Paladin blessings into Watchers and preserve existing defaults and saved choices.
+- Add Use buff bindings in Watchers. When enabled, reminders stay visible with modifiers held and show existing buff shortcuts. Unbound buffs still use the automatic left-click fallback.
+- Clean up Home and add an Add button dropdown for mouse buttons 6–12. Identify buttons still supports extra buttons reported by the client.
+- Add Reset everything in Advanced to restore fresh defaults for the current character, including bindings, watcher rules, and minimap icon position.
+
 ## 1.2.0 — 2026-11-21
 
 - Watch Inner Fire by default for priests, only on frames representing the priest. Keep its enable/priority controls in Watchers and label it Self only.

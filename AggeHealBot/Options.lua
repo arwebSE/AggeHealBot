@@ -3,8 +3,13 @@ local panel, picker, selected, selectedButton = nil, nil, 1, 1
 local optionsCanvas, optionsCategory
 local toolsPane
 local buffPane
+local recipientsPane
 local selectedHoverKey
 local OpenPicker
+local OpenBuffs
+local function BuffClassLabel(token)
+    return (LOCALIZED_CLASS_NAMES_MALE or {})[token] or (token:sub(1, 1) .. token:sub(2):lower())
+end
 local FitEditor
 local categoryLabels = {heals = "Heal", buffs = "Buff", utility = "Utility", other = "Other", actions = "Action"}
 local categoryColors = {heals = {0.5, 1, 0.7}, buffs = {0.5, 0.75, 1}, utility = {0.8, 0.6, 1}, other = {0.6, 0.62, 0.66}, actions = {0.85, 0.75, 0.5}}
@@ -128,24 +133,17 @@ local function PageTab(parent, label, x, onClick)
             self[side .. "Active"]:SetShown(value)
             self[side .. "Highlight"]:Hide()
         end
-        local suffix = self.locked and " |A:Talents-lock-c60:14:10|a"
-            or value and " |A:Talents-Checkmark-c60:15:20|a" or ""
+        local suffix = value and " |A:Talents-Checkmark-c60:15:20|a" or ""
         self.Text:SetText(label .. suffix)
         self.Text:SetFontObject(GameFontHighlight)
-        if self.locked then self.Text:SetTextColor(0.5, 0.5, 0.5)
-        elseif value then self.Text:SetTextColor(1, 1, 1)
+        if value then self.Text:SetTextColor(1, 1, 1)
         else self.Text:SetTextColor(0.9, 0.8, 0.6) end
         self.Text:ClearAllPoints()
         self.Text:SetPoint("CENTER", self, "CENTER", 0, -4)
     end
-    function tab:SetLocked(value)
-        self.locked = value
-        self:SetEnabled(not value)
-        self:Select(self.selected)
-    end
     local function Highlight(self, visible)
         for _, side in ipairs({"Left", "Middle", "Right"}) do
-            self[side .. "Highlight"]:SetShown(visible and not self.locked and not self.selected)
+            self[side .. "Highlight"]:SetShown(visible and not self.selected)
         end
     end
     tab:SetScript("OnEnter", function(self) Highlight(self, true) end)
@@ -170,7 +168,7 @@ local function CanShowPaladin()
     return A.GetPlayerClass() == "PALADIN" or AggeHealBotDB.showPaladinDebug
 end
 local function SelectPage(page)
-    if page == "paladin" and not CanShowPaladin() then page = "home" end
+    if page == "paladin" and not CanShowPaladin() then page = "buffs" end
     panel.activePage = page
     if page ~= "home" and panel.identifier then panel.identifier:Stop() end
     if panel.status then panel.status:SetShown(page ~= "buffs") end
@@ -179,22 +177,9 @@ local function SelectPage(page)
     if picker then picker:SetShown(page == "home") end
     if buffPane then buffPane:SetShown(page == "buffs") end
     if toolsPane then toolsPane:SetShown(page == "paladin") end
-    if panel.nav then
-        local paladin = CanShowPaladin()
-        panel.nav.paladin:SetLocked(not paladin)
-        local index = 0
-        for _, key in ipairs({"home", "buffs", "paladin", "advanced"}) do
-            local tab = panel.nav[key]
-            local visible = key ~= "paladin" or paladin
-            tab:SetShown(visible)
-            if visible then
-                tab:ClearAllPoints()
-                tab:SetPoint("TOPLEFT", 24 + index * 162, -32)
-                index = index + 1
-            end
-        end
-        for key, tab in pairs(panel.nav) do tab:Select(key == page) end
-    end
+    if recipientsPane then recipientsPane:SetShown(page == "recipients") end
+    local activeTab = (page == "paladin" or page == "recipients") and "buffs" or page
+    for key, tab in pairs(panel.nav or {}) do tab:Select(key == activeTab) end
 end
 local function Current(prefix, button)
     if type(button) == "string" then return A.GetHoverBinding(button) end
@@ -233,6 +218,7 @@ local function Update()
     panel.raidControls:SetChecked(AggeHealBotDB.hideRaidControls)
     panel.partyControls:SetChecked(AggeHealBotDB.hidePartyControls)
     panel.paladinDebug:SetChecked(AggeHealBotDB.showPaladinDebug)
+    panel.fullReset:SetEnabled(not InCombatLockdown())
     SelectPage(panel.activePage or "home")
     for i, tab in ipairs(panel.tabs) do tab:Select(i == selected) end
     for i, row in ipairs(panel.rows) do
@@ -250,16 +236,21 @@ local function Update()
     panel.hoverKeys:SetShown(keyboard)
     panel.bindingMode:SetText(keyboard and "Mouse bindings" or "Keyboard bindings")
     panel.bindingMode:SetShown(AggeHealBotDB.hovercast)
+    panel.mouseMode:Select(not keyboard)
+    panel.mouseMode:SetShown(AggeHealBotDB.hovercast)
+    panel.mouseTitle:SetShown(not AggeHealBotDB.hovercast)
+    panel.bindingMode:Select(keyboard)
+    panel.addMouseButton:SetShown(not keyboard)
     panel.hoverKeys:Render(selectedHoverKey, Value)
     if keyboard and not (AggeHealBotDB.hoverBindings or {})[selectedHoverKey] and picker then picker:Hide() end
     local icon, alpha = A.GetBindingVisual(Current(prefix, selectedButton))
     panel.mouse:SetCaption(A.buttons[selectedButton], Value(Current(prefix, selectedButton)), icon, alpha)
     local extraHeight = panel.identifier.hasExtras and 62 or 0
-    panel:SetSize(780, 680 + extraHeight)
-    panel.home:SetSize(780, 648 + extraHeight)
-    panel.advanced:SetSize(780, 648 + extraHeight)
+    panel:SetSize(780, 680)
+    panel.home:SetSize(780, 648)
+    panel.advanced:SetSize(780, 648)
     panel.mouse:SetSize(315, 264 + extraHeight)
-    panel.divider:SetSize(1, 550 + extraHeight)
+    panel.divider:SetSize(1, 491)
     if panel.embeddedHost and FitEditor then FitEditor(panel.embeddedHost) end
     panel.status:SetText(InCombatLockdown() and "|cffffcc66Saved. Changes apply after combat.|r" or "Saved automatically for this character.")
     if picker then
@@ -270,6 +261,7 @@ local function Update()
     end
     if toolsPane and toolsPane:IsShown() then toolsPane:Render() end
     if buffPane and buffPane:IsShown() then buffPane:Render() end
+    if recipientsPane and recipientsPane:IsShown() then recipientsPane:Render() end
 end
 OpenPicker = function(button)
     if type(button) == "string" and not AggeHealBotDB.hovercast then button = selectedButton end
@@ -282,7 +274,7 @@ OpenPicker = function(button)
         -- Inline browser, not a second window covering the bindings.
         picker = CreateFrame("Frame", "AggeHealBotSpellPicker", panel.home)
         picker:SetSize(390, 479)
-        picker:SetPoint("TOPLEFT", 365, -43)
+        picker:SetPoint("TOPLEFT", 365, -98)
         picker.heading = Text(picker, "", 0, 0)
         picker.heading:SetWidth(384)
         picker.heading:SetWordWrap(false)
@@ -472,6 +464,7 @@ local function OpenBlessings()
         toolsPane:SetSize(732, 451)
         toolsPane:SetPoint("TOPLEFT", 24, -78)
         toolsPane.heading = Text(toolsPane, "", 0, 0)
+        Button(toolsPane, "Back to Watchers", 145, 587, -1, function() OpenBuffs() end)
         toolsPane.description = Text(toolsPane, "", 0, -33, "GameFontHighlightSmall")
         toolsPane.description:SetWidth(720)
         toolsPane.description:SetWordWrap(true)
@@ -545,7 +538,71 @@ local function OpenBlessings()
     toolsPane:Render()
     toolsPane:Show()
 end
-local function OpenBuffs()
+local function OpenBuffRecipients(id, spell)
+    local perPage = 20
+    if not recipientsPane then
+        local view = CreateFrame("Frame", "AggeHealBotBuffRecipients", panel)
+        recipientsPane = view
+        view:SetSize(732, 490)
+        view:SetPoint("TOPLEFT", 24, -78)
+        view.heading = Text(view, "", 0, 0)
+        Text(view, "Check yourself and any group members who should get this buff reminder.", 0, -31, "GameFontHighlightSmall")
+        Text(view, "Use the checked list to save it for this buff.", 0, -51, "GameFontHighlightSmall")
+        view.rows = {}
+        for index = 1, perPage do
+            local row = CreateFrame("CheckButton", nil, view, "UICheckButtonTemplate")
+            row:SetSize(25, 25)
+            row:SetPoint("TOPLEFT", index > 10 and 380 or 0, -84 - ((index - 1) % 10) * 32)
+            row:SetHitRectInsets(0, -300, 0, 0)
+            row.name = Text(row, "", 30, -5, "GameFontHighlight")
+            row.name:SetWidth(305)
+            row.name:SetWordWrap(false)
+            row:SetScript("OnClick", function(self)
+                if self.recipient then self.recipient.selected = self:GetChecked() end
+            end)
+            view.rows[index] = row
+        end
+        view.pageText = Text(view, "", 107, -424, "GameFontHighlightSmall")
+        view.previous = Button(view, "Previous", 90, 0, -417, function()
+            view.page = view.page - 1
+            view:Render()
+        end)
+        view.next = Button(view, "Next", 90, 168, -417, function()
+            view.page = view.page + 1
+            view:Render()
+        end)
+        view.apply = Button(view, "Use checked players", 170, 0, -457, function()
+            if A.SaveBuffRecipients(view.id, view.recipients) then OpenBuffs() end
+        end)
+        view.back = Button(view, "Back to Watchers", 150, 182, -457, function() OpenBuffs() end)
+        function view:Render()
+            local pages = math.max(1, math.ceil(#self.recipients / perPage))
+            self.page = math.max(1, math.min(self.page, pages))
+            self.pageText:SetText(self.page .. " / " .. pages)
+            self.pageText:SetShown(pages > 1)
+            self.previous:SetShown(pages > 1)
+            self.next:SetShown(pages > 1)
+            self.previous:SetEnabled(self.page > 1)
+            self.next:SetEnabled(self.page < pages)
+            for index, row in ipairs(self.rows) do
+                local recipient = self.recipients[(self.page - 1) * perPage + index]
+                row.recipient = recipient
+                row:SetShown(recipient ~= nil)
+                if recipient then
+                    row.name:SetText(recipient.name)
+                    row:SetChecked(recipient.selected)
+                end
+            end
+        end
+    end
+    recipientsPane.id = id
+    recipientsPane.recipients = A.GetBuffRecipients(id)
+    recipientsPane.page = 1
+    recipientsPane.heading:SetText("Choose players for " .. spell)
+    SelectPage("recipients")
+    recipientsPane:Render()
+end
+OpenBuffs = function()
     SelectPage("buffs")
     if picker then picker:Hide() end
     if toolsPane then toolsPane:Hide() end
@@ -554,6 +611,7 @@ local function OpenBuffs()
         buffPane:SetSize(732, 451)
         buffPane:SetPoint("TOPLEFT", 24, -78)
         Text(buffPane, "Buffs, cures & resurrection", 0, 0)
+        buffPane.blessings = Button(buffPane, "Paladin blessings", 145, 587, -1, OpenBlessings)
         local description = Text(buffPane, "Choose watched spells and their priority. This controls out-of-combat left click; combat cure alerts use your cure order.", 0, -30, "GameFontHighlightSmall")
         description:SetWidth(720)
         description:SetWordWrap(true)
@@ -610,6 +668,9 @@ local function OpenBuffs()
         buffPane.watchPets = ResCheck("watchPets", "Cure pets", 480,
             "Include friendly pets in cure watching. Pet click-healing works with this off. Buff and resurrection watches remain player-only. On by default.", -60)
         buffPane.watchPets:SetHitRectInsets(0, -80, 0, 0)
+        buffPane.modifierWatchers = ResCheck("watcherModifiers", "Use buff bindings", 72,
+            "Keep watcher icons and glows visible while holding Shift, Ctrl or Alt. If a missing buff already has a binding, the reminder shows that shortcut and leaves your left-click spell in place. Off by default.", -100)
+        buffPane.modifierWatchers:SetHitRectInsets(0, -130, 0, 0)
         buffPane.resurrection = ResCheck("resurrectionWatch", "Resurrection watcher", 0,
             "Offer a learned reagent-free resurrection on dead friendly players outside combat. Resurrection takes priority over cures and buffs. On by default. Turning this off also disables combat resurrection watching; manual bindings still work.")
         buffPane.combatRes = ResCheck("combatResurrection", "Combat resurrection", 380,
@@ -640,6 +701,7 @@ local function OpenBuffs()
         buffPane:SetScript("OnHide", function(self)
             self.order:CloseMenu()
             for _, row in ipairs(self.resSpells) do row.rank:CloseMenu() end
+            for _, row in ipairs(self.rows) do if row.scope then row.scope:CloseMenu() end end
         end)
         local function RenderList(kind, rows, x, list)
             for index, entry in ipairs(list) do
@@ -668,11 +730,66 @@ local function OpenBuffs()
                     row.name:SetWidth(218)
                     row.note = Text(row, "", 66, -23, "GameFontHighlightSmall")
                     row.note:SetWidth(218)
+                    if kind == "buffs" then
+                        row.note:SetWidth(76)
+                        row.scope = CreateFrame("DropdownButton", nil, row, "WowStyle1DropdownTemplate")
+                        row.scope:SetPoint("LEFT", 162, 0)
+                        row.scope:SetSize(122, 24)
+                        row.scope:SetSelectionText(function() return row.scopeLabel end)
+                        row.scope:SetupMenu(function(_, root)
+                            if root.SetScrollMode then root:SetScrollMode(300) end
+                            local function AddMode(menu, mode, label, help, caption)
+                                if not row.selfOnly and row.targetMode == mode then row.scopeLabel = caption or label end
+                                local item = menu:CreateRadio(label, function(value) return row.targetMode == value end,
+                                    function(value) A.SetBuffTargetMode(row.id, value); buffPane:Render() end, mode)
+                                if help then
+                                    item:SetTooltip(function(tooltip)
+                                        GameTooltip_SetTitle(tooltip, label)
+                                        GameTooltip_AddNormalLine(tooltip, help, true)
+                                    end)
+                                end
+                            end
+                            AddMode(root, "everyone", "Everyone")
+                            AddMode(root, "self", "Only me")
+                            root:CreateRadio("Choose players...", function() return row.targetMode == "selected" end, function()
+                                OpenBuffRecipients(row.id, row.spell)
+                            end)
+                            if row.targetMode == "selected" then row.scopeLabel = "Selected" end
+                            for _, choice in ipairs(A.buffTargetGroups) do
+                                local classes = A.buffTargetClasses[choice[1]]
+                                if classes then
+                                    local names = {}
+                                    for _, token in ipairs(classes) do names[#names + 1] = BuffClassLabel(token) end
+                                    local help = table.concat(names, ", ") .. ". Matches by class regardless of specialization."
+                                    local groupMenu = root:CreateButton(choice[2])
+                                    groupMenu:SetTooltip(function(tooltip)
+                                        GameTooltip_SetTitle(tooltip, choice[2])
+                                        GameTooltip_AddNormalLine(tooltip, help .. " Druids are optional.", true)
+                                    end)
+                                    AddMode(groupMenu, choice[1], "Default classes", help, choice[2])
+                                    AddMode(groupMenu, A.buffTargetDruidModes[choice[1]], "Include Druids",
+                                        help .. " Also includes Druids in any form.", choice[2] .. " + Druid")
+                                else
+                                    AddMode(root, choice[1], choice[2], "Matches players using this resource right now. Forms and stances can change who matches.")
+                                end
+                            end
+                            local roleMenu = root:CreateButton("Role")
+                            for _, choice in ipairs(A.buffTargetRoles) do
+                                AddMode(roleMenu, choice[1], choice[2], "Matches players with this assigned group role. Players without a role are skipped.")
+                            end
+                            local classMenu = root:CreateButton("Class")
+                            for _, token in ipairs(A.paladinClasses) do
+                                AddMode(classMenu, "class:" .. token, BuffClassLabel(token))
+                            end
+                        end)
+                        row.scope:SetScript("OnHide", function(self) self:CloseMenu() end)
+                    end
                     row.up = PriorityArrow(row, 1, 292, -8, function() A.MoveBuffWatch(row.id, -1, kind); buffPane:Render() end)
                     row.down = PriorityArrow(row, -1, 324, -8, function() A.MoveBuffWatch(row.id, 1, kind); buffPane:Render() end)
                     rows[index] = row
                 end
                 row.id = entry.id
+                row.spell = entry.name
                 local active = kind ~= "cures" or AggeHealBotDB.cureWatch
                 row:SetAlpha(active and 1 or 0.4)
                 row.check:SetEnabled(active)
@@ -681,12 +798,28 @@ local function OpenBuffs()
                 row.icon:SetDesaturated(not active)
                 row.icon:SetAlpha(entry.enabled and entry.learned and 1 or 0.4)
                 row.name:SetText(entry.name)
+                if row.scope then row.name:SetWidth(92) end
                 local note = not entry.enabled and "Off" or entry.learned and ("Priority " .. index) or "Not learned yet"
-                if entry.selfOnly then note = note .. " - Self only" end
+                if row.scope then
+                    row.targetMode = entry.targetMode
+                    row.selfOnly = entry.selfOnly
+                    row.scopeLabel = entry.selfOnly and "Self only" or "Everyone"
+                    row.scope:SetDefaultText(row.scopeLabel)
+                    row.scope:GenerateMenu()
+                    row.scope:SetEnabled(not entry.selfOnly)
+                    row.scope:SetAlpha(entry.selfOnly and 0.5 or 1)
+                    note = ""
+                end
                 if kind == "cures" and entry.enabled and entry.learned then
                     note = (AggeHealBotDB.cureWatchRules and ("Priority " .. index) or "Default") .. " - " .. (entry.kinds or "")
                 end
                 row.note:SetText(note)
+                if row.scope then
+                    row.name:ClearAllPoints()
+                    row.name:SetPoint("LEFT", row, "LEFT", 66, 0)
+                    row.name:SetWordWrap(true)
+                    row.name:SetAlpha(entry.enabled and entry.learned and 1 or 0.55)
+                end
                 row.up:SetAvailable(active and index > 1)
                 row.down:SetAvailable(active and index < #list)
                 row:Show()
@@ -694,6 +827,8 @@ local function OpenBuffs()
             for index = #list + 1, #rows do rows[index]:Hide() end
         end
         function buffPane:Render()
+            self.blessings:SetShown(CanShowPaladin())
+            self.modifierWatchers:SetChecked(AggeHealBotDB.watcherModifiers)
             self.watchPets:SetChecked(AggeHealBotDB.watchPets)
             self.combatCures:SetChecked(AggeHealBotDB.combatCures)
             self.combatCures:SetEnabled(AggeHealBotDB.cureWatch)
@@ -715,7 +850,7 @@ local function OpenBuffs()
             self.buffHeading:SetText(AggeHealBotDB.smartBuffs and "Buffs" or "Buffs (off)")
             self.cureHeading:SetText(AggeHealBotDB.cureWatch and "Cures" or "Cures (off)")
             self.cureHeading:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.4)
-            self.empty:SetText(#buffs > 0 and "" or A.GetPlayerClass() == "PALADIN" and "Choose the blessing for each class in the Paladin tab." or "This class has no automatic buff-watch list.")
+            self.empty:SetText(#buffs > 0 and "" or A.GetPlayerClass() == "PALADIN" and "Set class assignments in Paladin blessings." or "This class has no automatic buff-watch list.")
             self.resurrection:SetChecked(AggeHealBotDB.resurrectionWatch)
             self.combatRes:SetChecked(AggeHealBotDB.combatResurrection)
             self.combatRes:SetEnabled(AggeHealBotDB.resurrectionWatch)
@@ -831,14 +966,33 @@ function A.ShowOptions(host)
         end)
         panel.advancedReset:ClearAllPoints()
         panel.advancedReset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 13)
+        local resetDialog = "AGGEHEALBOT_RESET_EVERYTHING"
+        StaticPopupDialogs[resetDialog] = {
+            text = "Reset all AggeHealBot settings and bindings for this character? This also resets watchers and the minimap icon position, then reloads the UI.",
+            button1 = "Reset everything",
+            button2 = CANCEL or "Cancel",
+            OnAccept = function()
+                if InCombatLockdown() then return end
+                -- Reload to discard live secure bindings and cached state as well.
+                wipe(AggeHealBotDB)
+                ReloadUI()
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+        }
+        panel.fullReset = Button(panel.advanced, "Reset everything", 155, 0, 0, function()
+            if not InCombatLockdown() then StaticPopup_Show(resetDialog) end
+        end)
+        panel.fullReset:ClearAllPoints()
+        panel.fullReset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 244, 13)
         panel.nav = {}
-        for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"paladin", "Paladin"}, {"advanced", "Advanced"}}) do
+        for index, entry in ipairs({{"home", "Home"}, {"buffs", "Watchers"}, {"advanced", "Advanced"}}) do
             local key = entry[1]
             local tab = PageTab(panel, entry[2], 24 + (index - 1) * 162, function()
                 if key == "home" then OpenPicker(selectedButton)
                 elseif key == "buffs" then OpenBuffs()
-                elseif key == "advanced" then SelectPage("advanced")
-                else OpenBlessings() end
+                else SelectPage("advanced") end
             end)
             panel.nav[key] = tab
         end
@@ -846,7 +1000,7 @@ function A.ShowOptions(host)
         panel.divider = divider
         divider:SetColorTexture(0.65, 0.45, 0.2, 0.45)
         divider:SetSize(1, resetY - 32)
-        divider:SetPoint("TOPLEFT", 349, -43)
+        divider:SetPoint("TOPLEFT", 349, -98)
         local function Check(key, label, x, y, description, inverted, parent)
             local check = CreateFrame("CheckButton", nil, parent or panel.home, "UICheckButtonTemplate")
             check:SetPoint("TOPLEFT", x, y)
@@ -901,12 +1055,29 @@ function A.ShowOptions(host)
             "Hide Blizzard's group-control side panel and tab while in a raid. Raid unit frames stay visible. On by default.", false, panel.advanced)
         panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -312,
             "Hide Blizzard's group-control side panel and tab while outside a raid, including raid-style party frames. Party unit frames stay visible. On by default.", false, panel.advanced)
-        panel.paladinDebug = Check("showPaladinDebug", "Show Paladin tab (debug)", 18, -402,
-            "Show and allow editing the Paladin settings tab on other classes for testing. This does not grant paladin spells or enable paladin buff watching on another class. Off by default.", false, panel.advanced)
+        panel.paladinDebug = Check("showPaladinDebug", "Preview Paladin blessings", 18, -402,
+            "Show the Paladin blessings editor under Watchers on other classes for testing. Off by default.", false, panel.advanced)
         panel.hovercast = Check("hovercast", "Hovercast", 182, -109,
             "Cast with keyboard keys while hovering a supported unit frame. Configure keys with Keyboard bindings below. Keys temporarily override their normal action only over these frames. Off by default. Changes made during combat apply after combat.")
-        panel.modifierTitle = Text(panel.home, "MODIFIERS", 24, -156, "GameFontHighlightSmall")
-        panel.bindingMode = Button(panel.home, "Keyboard bindings", 139, 200, -147, function()
+        -- Keep Home options in a single toolbar, above both binding columns.
+        local optionsStrip = panel.home:CreateTexture(nil, "BACKGROUND")
+        optionsStrip:SetPoint("TOPLEFT", 18, -34)
+        optionsStrip:SetSize(744, 39)
+        optionsStrip:SetColorTexture(0.025, 0.035, 0.045, 0.4)
+        local rule = panel.home:CreateTexture(nil, "BORDER")
+        rule:SetPoint("TOPLEFT", 18, -81)
+        rule:SetSize(744, 1)
+        rule:SetColorTexture(0.65, 0.45, 0.2, 0.45)
+        for index, check in ipairs({panel.buffs, panel.cures, panel.showTooltip, panel.minimap, panel.targetOnCast, panel.hovercast}) do
+            check:ClearAllPoints()
+            check:SetPoint("TOPLEFT", 18 + (index - 1) * 124, -37)
+            check:SetHitRectInsets(0, -90, 2, 2)
+        end
+        panel.modifierTitle = Text(panel.home, "MODIFIERS", 24, -137, "GameFontHighlightSmall")
+        panel.mouseTitle = Text(panel.home, "Mouse bindings", 24, -104)
+        panel.mouseMode = Button(panel.home, "Mouse bindings", 155, 24, -98, function() OpenPicker(selectedButton) end)
+        panel.mouseMode:EnableSelectionGlow()
+        panel.bindingMode = Button(panel.home, "Keyboard bindings", 155, 184, -98, function()
             if not AggeHealBotDB.hovercast then return end
             panel.hoverEditor = not panel.hoverEditor
             panel.identifier:Stop()
@@ -915,11 +1086,14 @@ function A.ShowOptions(host)
                 if keys[1] then OpenPicker((AggeHealBotDB.hoverBindings or {})[selectedHoverKey] and selectedHoverKey or keys[1]) else Update() end
             else OpenPicker(selectedButton) end
         end)
+        panel.bindingMode:EnableSelectionGlow()
         panel.hoverKeys = A.CreateHoverKeyEditor(panel.home, Button, Text, OpenPicker, Update)
+        panel.hoverKeys:ClearAllPoints()
+        panel.hoverKeys:SetPoint("TOPLEFT", 24, -145)
         panel.tabs = {}
         local labels = {"None", "Shift", "Ctrl", "Alt", "Ctrl+Shift", "Alt+Shift", "Alt+Ctrl", "All 3"}
         for i, label in ipairs(labels) do
-            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -178 - math.floor((i - 1) / 4) * 30, function()
+            panel.tabs[i] = Button(panel.home, label, 75, 24 + ((i - 1) % 4) * 78, -157 - math.floor((i - 1) / 4) * 30, function()
                 selected = i
                 OpenPicker(selectedButton)
             end)
@@ -931,7 +1105,7 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, index)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
-        panel.mouse:SetPoint("TOPLEFT", 24, -286)
+        panel.mouse:SetPoint("TOPLEFT", 24, -268)
         panel.identifier = A.CreateButtonIdentifier(panel.mouse, Button, function(number, prefix)
             if not A.RememberMouseButton(number) then return end
             for index, mod in ipairs(A.modifiers) do if mod.prefix == prefix then selected = index; break end end
@@ -942,6 +1116,22 @@ function A.ShowOptions(host)
             GameTooltip:AddLine(Value(Current(A.modifiers[selected].prefix, number)), 1, 1, 1, true)
             GameTooltip:Show()
         end)
+        panel.identifier.identify:ClearAllPoints()
+        panel.identifier.identify:SetPoint("TOPLEFT", panel.home, "TOPLEFT", 24, -230)
+        panel.identifier.identify:SetSize(155, 27)
+        panel.addMouseButton = CreateFrame("DropdownButton", nil, panel.home, "WowStyle1DropdownTemplate")
+        panel.addMouseButton:SetPoint("TOPLEFT", 184, -230)
+        panel.addMouseButton:SetSize(155, 27)
+        panel.addMouseButton:SetDefaultText("Add button...")
+        panel.addMouseButton:SetupMenu(function(_, root)
+            if root.SetScrollMode then root:SetScrollMode(300) end
+            for number = 6, 12 do
+                root:CreateRadio(A.buttons[number], function() return false end, function(value)
+                    if A.RememberMouseButton(value) then OpenPicker(value) end
+                end, number)
+            end
+        end)
+        panel.addMouseButton:SetScript("OnHide", function(self) self:CloseMenu() end)
         panel.identifier.onStart = function() if picker then picker.search:ClearFocus() end end
         panel.rows = {}
         for i, button in ipairs(panel.mouse.buttons) do

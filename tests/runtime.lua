@@ -507,18 +507,37 @@ CreateFrame = function(kind, name, parent, template)
     if kind == "DropdownButton" then
         f.Text = CreateFrame("FontString")
         function f:SetDefaultText(text) self.defaultText = text end
+        function f:SetSelectionText(fn) self.selectionText = fn end
         function f:CloseMenu() self.menuOpen = false end
         function f:SetupMenu(generator) self.menuGenerator = generator end
         function f:GenerateMenu()
             self.menuOptions = {}
             local dropdown = self
-            local root = {}
-            function root:CreateRadio(label, selected, choose, data)
-                dropdown.menuOptions[data] = {label = label, selected = function() return selected(data) end,
-                    choose = function() choose(data) end}
-                if selected(data) then dropdown.selectedText = label end
+            local function Menu(options)
+                local menu = {}
+                function menu:CreateRadio(label, selected, choose, data)
+                    local item = {label = label, selected = function() return selected(data) end,
+                        choose = function() choose(data) end}
+                    function item:SetTooltip(fn) self.tooltip = fn end
+                    options[data or label] = item
+                    if selected(data) then dropdown.selectedText = label end
+                    return item
+                end
+                function menu:CreateButton(label, choose)
+                    local submenu = {}
+                    options[label] = submenu
+                    submenu.choose = choose
+                    local description = Menu(submenu)
+                    function description:SetTooltip(fn) submenu.tooltip = fn end
+                    return description
+                end
+                menu.CreateCheckbox = menu.CreateRadio
+                function menu:SetScrollMode() end
+                function menu:CreateTitle(label) options.title = label end
+                function menu:CreateDivider() end
+                return menu
             end
-            self.menuGenerator(self, root)
+            self.menuGenerator(self, Menu(self.menuOptions))
         end
     end
     f.TitleText = {SetText = function() end}
@@ -587,6 +606,8 @@ end}
 assert(loadfile("AggeHealBot/MouseBindings.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/ButtonIdentify.lua"))("AggeHealBot", ns)
 assert(loadfile("AggeHealBot/HoverOptions.lua"))("AggeHealBot", ns)
+StaticPopupDialogs = {}
+function StaticPopup_Show(which) StaticPopupDialogs.shown = which end
 assert(loadfile("AggeHealBot/Options.lua"))("AggeHealBot", ns)
 assert(registeredCanvas and registeredCategory, "editor registered in Options AddOns")
 local category = ns.RegisterOptionsCategory()
@@ -1576,8 +1597,9 @@ event("UNIT_AURA", "target")
 assert(targetButton.attrs.spell1 == "Cleanse")
 RAID_CLASS_COLORS = {WARRIOR = {r = 0.78, g = 0.61, b = 0.43}}
 ns.ShowOptions()
-assert(AggeHealBotSettings.nav.paladin.enabled and AggeHealBotSettings.activePage == "home")
-AggeHealBotSettings.nav.paladin.scripts.OnClick()
+assert(AggeHealBotSettings.activePage == "home")
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+AggeHealBotBuffSettings.blessings.scripts.OnClick()
 assert(AggeHealBotTools.rows[1].class == "WARRIOR")
 AggeHealBotTools.rows[1].dropdown.menuOptions.might.choose()
 assert(ns.GetPaladinRule("WARRIOR") == "might")
@@ -1654,7 +1676,8 @@ print("PASS: editable Shift-left target and Shift-middle settings defaults on al
 
 -- Blessing choices are real dropdowns, not row clicks or mouse-wheel cycles.
 ns.ShowOptions()
-AggeHealBotSettings.nav.paladin.scripts.OnClick()
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+AggeHealBotBuffSettings.blessings.scripts.OnClick()
 assert(AggeHealBotTools.shown and not AggeHealBotSpellPicker.shown)
 local warrior = AggeHealBotTools.rows[1]
 assert(warrior.dropdown.template == "WowStyle1DropdownTemplate" and warrior.scripts.OnClick == nil)
@@ -2142,7 +2165,7 @@ C_SpellBook.GetSpellBookItemInfo = function(index) return ({ {spellID = 1126}, {
 event("SPELLS_CHANGED")
 buffUI:Render()
 assert(ns.GetBuffWatchList()[2].enabled and not ns.GetBuffWatchList()[2].learned
-    and buffUI.rows[2].note.text == "Not learned yet", "unlearned watchers remain configurable without being cast")
+    and buffUI.rows[2].icon.alpha == 0.4, "unlearned watchers remain configurable without being cast")
 known[467] = "Thorns"
 assert(not ns.SetBuffWatchEnabled(999999, false) and not ns.MoveBuffWatch(1126, 2))
 ns.SetBuffWatchEnabled(1126, false)
@@ -2153,10 +2176,9 @@ assert(not buffUI.shown and AggeHealBotSpellPicker.shown, "buff settings button 
 print("PASS: untouched buff defaults, per-character enable/order, UI controls, watcher integration, default restoration and deferred combat changes")
 assert(AggeHealBotSettings.activePage == "home" and AggeHealBotSettings.home.shown
     and AggeHealBotSettings.nav.home.selected)
-assert(not AggeHealBotSettings.nav.paladin.enabled and AggeHealBotSettings.nav.paladin.locked,
-    "Paladin tab stays greyed out for a druid")
-AggeHealBotSettings.nav.paladin.scripts.OnClick()
-assert(AggeHealBotSettings.activePage == "home", "disabled Paladin navigation cannot switch pages")
+assert(AggeHealBotSettings.nav.paladin == nil)
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+assert(not AggeHealBotBuffSettings.blessings.shown)
 AggeHealBotSettings.nav.buffs.scripts.OnClick()
 assert(AggeHealBotSettings.activePage == "buffs" and not AggeHealBotSettings.home.shown
     and not AggeHealBotSpellPicker.shown and buffUI.shown and AggeHealBotSettings.nav.buffs.selected)
@@ -2340,10 +2362,10 @@ for _, entry in ipairs(ns.GetCureWatchList()) do
 end
 assert(dispelRows == 1, "alternate ranks must not duplicate the same cure in settings")
 ns.ShowOptions()
-local homeTab, paladinTab = AggeHealBotSettings.nav.home, AggeHealBotSettings.nav.paladin
+local homeTab = AggeHealBotSettings.nav.home
 assert(homeTab.template == "TabSystemButtonArtTemplate" and homeTab.isTabOnTop and homeTab.rotationHandled)
 assert(homeTab.LeftActive.shown and not homeTab.Left.shown and homeTab.Text.text:find("Talents-Checkmark-c60", 1, true))
-assert(paladinTab.locked and paladinTab.Text.text:find("Talents-lock-c60", 1, true))
+assert(AggeHealBotSettings.nav.paladin == nil)
 print("PASS: cure enable/order and rank deduplication, combined watcher priority UI, preserved defaults/resurrection, combat deferral and native talent-style tabs")
 local watchersTab = AggeHealBotSettings.nav.buffs
 watchersTab.scripts.OnEnter(watchersTab)
@@ -2631,18 +2653,19 @@ print("PASS: Advanced navigation, moved controls, independent default-on party/r
 
 -- Resurrection controls and debug-only Paladin navigation.
 ns.ShowOptions()
-assert(not settings.nav.paladin.shown and not AggeHealBotDB.showPaladinDebug)
+assert(settings.nav.paladin == nil and not AggeHealBotDB.showPaladinDebug)
 assert(settings.nav.advanced.point[2] == 348, "hidden Paladin tab must not leave a gap")
 settings.paladinDebug:SetChecked(true)
 settings.paladinDebug.scripts.OnClick(settings.paladinDebug)
-assert(settings.nav.paladin.shown and settings.nav.paladin.enabled)
-settings.nav.paladin.scripts.OnClick()
+settings.nav.buffs.scripts.OnClick()
+assert(AggeHealBotBuffSettings.blessings.shown)
+AggeHealBotBuffSettings.blessings.scripts.OnClick()
 assert(settings.activePage == "paladin" and AggeHealBotTools.shown)
 assert(ns.SetPaladinRule("WARRIOR", "kings"), "debug mode permits editing the Paladin rules")
 assert(ns.GetPlayerClass() == "DRUID", "debug UI must never change watcher class")
 ns.SetOption("showPaladinDebug", false)
 settings.scripts.OnEvent()
-assert(not settings.nav.paladin.shown and settings.activePage == "home")
+assert(not AggeHealBotBuffSettings.blessings.shown and settings.activePage == "buffs")
 assert(not ns.SetPaladinRule("WARRIOR", "might"), "other classes cannot edit hidden Paladin rules without debug")
 settings.nav.buffs.scripts.OnClick()
 local resurrectionUI = AggeHealBotBuffSettings
@@ -3031,7 +3054,7 @@ assert(AggeHealBotSpellPicker.button == 2 and settings.mouse.buttons[2].selected
 identify.capture.scripts.OnMouseDown(identify.capture, "Button7")
 assert(AggeHealBotDB.extraMouseButtons[7] and AggeHealBotSpellPicker.button == 7)
 assert(#ns.GetBindings() == base + #ns.modifiers and PlayerFrame.attrs.type7 == "none")
-assert(settings.height == 742 and identify.chips[1].number == 7 and identify.chips[1].selected)
+assert(settings.height == 680 and identify.chips[1].number == 7 and identify.chips[1].selected)
 assert(settings.mouse.captionTitle.text == "Button 7" and identify.hint.text == "Detected: Button 7")
 for _, region in ipairs(settings.mouse.buttons) do assert(not region.selected and not region.pulse.playing) end
 AggeHealBotSpellPicker.search:SetText("Regrowth")
@@ -3282,6 +3305,7 @@ assert(PlayerFrame.attrs.spell1 == "Inner Fire", "new self buff defaults enabled
 local found
 for _, entry in ipairs(ns.GetBuffWatchList()) do if entry.id == 588 then found = entry end end
 assert(found and found.enabled and found.selfOnly and found.learned)
+assert(not ns.SetBuffTargetMode(588, "everyone"), "self-only spells cannot be widened to party recipients")
 auras.player = PriestAuras(true)
 event("UNIT_AURA", "player")
 assert(PlayerFrame.attrs.spell1 == "Flash Heal", "active Inner Fire suppresses its watch")
@@ -3306,4 +3330,192 @@ auras.player = beforeAuras
 ns.ResetOptions()
 event("PLAYER_LOGIN")
 print("PASS: default priest Inner Fire, existing saved orders, self aliases, aura suppression, teammate exclusion, enable/reset and unlearned safety")
+end)()
+
+-- Manual extra-button slots use the same picker and secure binding path.
+;(function()
+combat = false
+ns.ShowOptions()
+local settings = AggeHealBotSettings
+settings.addMouseButton:GenerateMenu()
+assert(settings.addMouseButton.menuOptions[6] and settings.addMouseButton.menuOptions[12] and not settings.addMouseButton.menuOptions[13])
+settings.addMouseButton.menuOptions[12].choose()
+assert(AggeHealBotSpellPicker.button == 12 and AggeHealBotDB.extraMouseButtons[12])
+assert(settings.height == 680 and settings.identifier.selected == 12)
+assert(AggeHealBotSpellPicker:Save("spell", "Regrowth"))
+assert(PlayerFrame.attrs[AggeHealBotSpellPicker.prefix .. "macrotext12"]:find("Regrowth", 1, true))
+print("PASS: manual extra mouse-button selection, shared spell picker and secure action binding")
+end)()
+
+-- Per-buff recipients and optional modifier reminders preserve manual bindings.
+;(function()
+combat = false
+local old = {UnitClass = UnitClass, UnitExists = UnitExists, UnitIsPlayer = UnitIsPlayer, UnitCanAssist = UnitCanAssist,
+    UnitIsUnit = UnitIsUnit, UnitGUID = UnitGUID, UnitName = UnitName, IsInRaid = IsInRaid,
+    UnitIsDeadOrGhost = UnitIsDeadOrGhost, UnitIsConnected = UnitIsConnected, UnitHealth = UnitHealth, UnitHealthMax = UnitHealthMax,
+    IsModifierKeyDown = IsModifierKeyDown, IsShiftKeyDown = IsShiftKeyDown, IsControlKeyDown = IsControlKeyDown, IsAltKeyDown = IsAltKeyDown,
+    book = C_SpellBook.GetSpellBookItemInfo}
+local held = false
+local ids = {player = "ME", target = "TANK", party1 = "TANK", party2 = "OTHER"}
+UnitClass = function() return "Druid", "DRUID" end
+UnitExists = function(unit) return ids[unit] ~= nil end
+UnitIsPlayer, UnitCanAssist, UnitIsConnected = function() return true end, function() return true end, function() return true end
+UnitIsDeadOrGhost = function() return false end
+UnitIsUnit = function(a, b) return ids[a] ~= nil and ids[a] == ids[b] end
+UnitGUID = function(unit) return ids[unit] end
+UnitName = function(unit) return unit == "party1" and "Tank friend" or unit == "party2" and "Other friend" or "Me" end
+IsInRaid = function() return false end
+UnitHealth, UnitHealthMax = function() return 100 end, function() return 100 end
+IsModifierKeyDown, IsShiftKeyDown = function() return held end, function() return held end
+IsControlKeyDown, IsAltKeyDown = function() return false end, function() return false end
+known[1126], known[467], known[8936] = "Mark", "Thorns", "Regrowth"
+spellNames[1126], spellNames[467], spellNames[8936] = "Mark", "Thorns", "Regrowth"
+C_SpellBook.GetSpellBookItemInfo = function(slot) return ({ {spellID = 1126}, {spellID = 467}, {spellID = 8936} })[slot] end
+for unit in pairs(ids) do auras[unit], harmful[unit], ranges[unit] = {{name = "Mark", spellId = 9885}}, {}, nil end
+ns.ResetOptions()
+ns.ResetBindings()
+event("PLAYER_LOGIN")
+local target = ns.targetButton
+assert(ns.SetBuffTargetMode(467, "self"))
+assert(PlayerFrame.attrs.spell1 == "Thorns" and target.attrs.spell1 == "Regrowth")
+assert(not ns.SetBuffTargetMode(467, "made-up") and not ns.SetBuffTargetMode(999999, "self"))
+assert(ns.SetBuffTargetMode(467, "selected"))
+assert(PlayerFrame.attrs.spell1 == "Thorns" and target.attrs.spell1 == "Regrowth")
+local roster = ns.GetBuffRecipients(467)
+assert(roster[1].key == "self" and roster[1].selected and #roster == 3)
+assert(ns.SetBuffRecipient(467, "TANK", true))
+assert(target.attrs.spell1 == "Thorns", "a selected tank is watched through its target alias")
+event("ADDON_LOADED", "AggeHealBot")
+assert(AggeHealBotDB.buffWatch.targets[467].players.TANK == "Tank friend", "saved recipients survive settings initialization")
+local other = CreateFrame("Button", "CompactRaidFrame72")
+other:SetAttribute("unit", "party2")
+callbacks.CompactUnitFrame_SetUnit(other)
+assert(other.attrs.spell1 == "Regrowth", "other party members are not included")
+assert(ns.SetBuffRecipient(467, "self", false))
+assert(PlayerFrame.attrs.spell1 == "Regrowth" and target.attrs.spell1 == "Thorns")
+ns.ShowOptions()
+AggeHealBotSettings.nav.buffs.scripts.OnClick()
+local pane = AggeHealBotBuffSettings
+local row
+for _, item in ipairs(pane.rows) do if item.id == 467 then row = item end end
+assert(row and row.scope.selectionText() == "Selected")
+row.scope:GenerateMenu()
+row.scope.menuOptions.everyone.choose()
+row.scope.menuOptions["Choose players..."].choose()
+local checklist = AggeHealBotBuffRecipients
+assert(checklist.shown and not pane.shown and checklist.heading.text:find("Thorns", 1, true))
+assert(checklist.rows[1].recipient.key == "self" and not checklist.rows[1].checked)
+checklist.rows[1]:SetChecked(true)
+checklist.rows[1].scripts.OnClick(checklist.rows[1])
+assert(not AggeHealBotDB.buffWatch.targets[467].players.self, "staged edits wait for confirmation")
+checklist.back.scripts.OnClick()
+assert(pane.shown and not checklist.shown and row.targetMode == "everyone")
+row.scope.menuOptions["Choose players..."].choose()
+checklist.rows[1]:SetChecked(true)
+checklist.rows[1].scripts.OnClick(checklist.rows[1])
+checklist.apply.scripts.OnClick()
+assert(pane.shown and row.targetMode == "selected")
+assert(target.attrs.spell1 == "Thorns")
+assert(PlayerFrame.attrs.spell1 == "Thorns" and other.attrs.spell1 == "Regrowth")
+local originalPower = UnitPowerType
+UnitPowerType = function(unit) return ids[unit] == "TANK" and 1 or 0 end
+assert(ns.SetBuffTargetMode(467, "rage"))
+assert(target.attrs.spell1 == "Thorns" and PlayerFrame.attrs.spell1 == "Regrowth")
+UnitPowerType = function() return 0 end
+event("UNIT_DISPLAYPOWER", "target")
+assert(target.attrs.spell1 == "Regrowth")
+UnitPowerType = originalPower
+UnitClass = function(unit)
+    if ids[unit] == "TANK" then return "Warrior", "WARRIOR" end
+    if ids[unit] == "OTHER" then return "Shaman", "SHAMAN" end
+    return "Druid", "DRUID"
+end
+row.scope.menuOptions.Casters.casters.choose()
+assert(other.attrs.spell1 == "Thorns" and target.attrs.spell1 == "Regrowth", "Shaman is included in Casters")
+assert(PlayerFrame.attrs.spell1 == "Regrowth" and row.scope.menuOptions.Casters.tooltip and row.scope.menuOptions.Melee.tooltip)
+row.scope.menuOptions.Casters["casters+druid"].choose()
+assert(PlayerFrame.attrs.spell1 == "Thorns" and other.attrs.spell1 == "Thorns" and target.attrs.spell1 == "Regrowth")
+row.scope.menuOptions.Melee["melee+druid"].choose()
+assert(PlayerFrame.attrs.spell1 == "Thorns" and other.attrs.spell1 == "Regrowth" and target.attrs.spell1 == "Thorns")
+assert(ns.SetBuffTargetMode(467, "melee"))
+assert(target.attrs.spell1 == "Thorns" and PlayerFrame.attrs.spell1 == "Regrowth")
+row.scope:GenerateMenu()
+assert(not row.scope.menuOptions["class:WARRIOR"])
+row.scope.menuOptions.Class["class:WARRIOR"].choose()
+assert(target.attrs.spell1 == "Thorns" and row.scope.selectionText() == "Warrior")
+local originalRole = UnitGroupRolesAssigned
+local roles = {ME = "HEALER", TANK = "TANK", OTHER = "DAMAGER"}
+UnitGroupRolesAssigned = function(unit) return roles[ids[unit]] or "NONE" end
+assert(not row.scope.menuOptions.tanks)
+row.scope.menuOptions.Role.tanks.choose()
+assert(target.attrs.spell1 == "Thorns" and PlayerFrame.attrs.spell1 == "Regrowth")
+roles.TANK = "NONE"
+event("PLAYER_ROLES_ASSIGNED")
+assert(target.attrs.spell1 == "Regrowth")
+row.scope.menuOptions.Role.healers.choose()
+assert(PlayerFrame.attrs.spell1 == "Thorns" and other.attrs.spell1 == "Regrowth")
+row.scope.menuOptions.Role.dps.choose()
+assert(PlayerFrame.attrs.spell1 == "Regrowth" and other.attrs.spell1 == "Thorns")
+UnitGroupRolesAssigned = originalRole
+assert(ns.SetBuffTargetMode(467, "everyone"))
+ns.SaveBinding("shift-", 1, "spell", "Thorns")
+held = true
+event("MODIFIER_STATE_CHANGED")
+assert(not target.regions[2].shown, "modifier reminders remain off by default")
+assert(target.attrs.spell1 == "Thorns", "without the option, plain left click still handles the missing buff")
+local macro = target.attrs["shift-macrotext1"]
+ns.SetOption("watcherModifiers", true)
+event("MODIFIER_STATE_CHANGED")
+assert(target.regions[2].shown and target.attrs["shift-macrotext1"] == macro and macro:find("Thorns", 1, true))
+assert(other.regions[2].shown, "enabled modifier reminders apply consistently to group frames")
+assert(target.attrs.spell1 == "Regrowth" and not target.attrs.macrotext1:find("Thorns", 1, true),
+    "a bound buff stays on its assigned shortcut when modifier reminders are enabled")
+local plain = target.attrs.macrotext1
+combat = true
+assert(ns.SetBuffTargetMode(467, "self"))
+assert(target.attrs.macrotext1 == plain, "recipient edits never rewrite protected combat actions")
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(target.attrs.spell1 == "Regrowth")
+held = false
+ns.ResetWatchers()
+assert(not AggeHealBotDB.watcherModifiers and target.attrs.spell1 == "Thorns")
+for key, value in pairs(old) do if key ~= "book" then _G[key] = value end end
+C_SpellBook.GetSpellBookItemInfo = old.book
+ns.ResetOptions()
+event("PLAYER_LOGIN")
+print("PASS: per-buff self/selected recipients, GUID aliases, exclusions, native scope menu, modifier reminders, unchanged binds, combat deferral and reset")
+end)()
+
+-- The full reset follows the Advanced confirmation and starts from a clean character profile.
+;(function()
+combat = false
+local reloads = 0
+ReloadUI = function() reloads = reloads + 1 end
+ns.ShowOptions()
+local settings = AggeHealBotSettings
+settings.nav.advanced.scripts.OnClick()
+AggeHealBotDB.bindings = {["1"] = {action = "none"}}
+AggeHealBotDB.extraMouseButtons = {[8] = true}
+AggeHealBotDB.hoverBindings = {Q = {action = "none"}}
+AggeHealBotDB.buffWatch = {class = "DRUID", targets = {[467] = {mode = "self"}}}
+AggeHealBotDB.minimap = {minimapPos = 72}
+AggeHealBotDB.specCache = {sample = {}}
+AggeHealBotDB.playerFrame = false
+settings.fullReset.scripts.OnClick()
+local dialog = assert(StaticPopupDialogs[StaticPopupDialogs.shown])
+assert(AggeHealBotDB.minimap.minimapPos == 72 and reloads == 0, "opening the confirmation must not clear settings")
+combat = true
+dialog.OnAccept()
+assert(AggeHealBotDB.minimap.minimapPos == 72 and reloads == 0, "confirming during combat must not reset or reload")
+combat = false
+dialog.OnAccept()
+assert(next(AggeHealBotDB) == nil and reloads == 1, "confirmed reset clears all saved data and reloads the UI")
+event("ADDON_LOADED", "AggeHealBot")
+event("PLAYER_LOGIN")
+assert(AggeHealBotDB.playerFrame and next(AggeHealBotDB.bindings) == nil)
+assert(#ns.GetMouseButtons() == 5 and #ns.GetHoverKeys() == 0)
+ns.UpdateMinimap()
+assert(AggeHealBotDB.minimap.minimapPos == 225, "minimap returns to the fresh-install position")
+print("PASS: Advanced full reset confirmation, combat guard and fresh character defaults")
 end)()
