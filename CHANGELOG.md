@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2 — 2026-11-26
+
+- Add an opt-in Buff pets setting in Watchers. Thorns is the only buff currently watched on friendly pets.
+
 ## 1.2.1 — 2026-11-26
 
 - Choose who each buff watches. Use Everyone, Only me, a saved player checklist, a class, an assigned role, or a resource group. Casters and Melee each offer an Include Druids option.

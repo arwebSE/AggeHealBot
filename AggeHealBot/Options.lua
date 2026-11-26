@@ -666,11 +666,14 @@ OpenBuffs = function()
         buffPane.combatCures:SetHitRectInsets(0, -110, 0, 0)
         panel.combatCures = buffPane.combatCures
         buffPane.watchPets = ResCheck("watchPets", "Cure pets", 480,
-            "Include friendly pets in cure watching. Pet click-healing works with this off. Buff and resurrection watches remain player-only. On by default.", -60)
+            "Include friendly pets in cure watching. Pet click-healing works with this off. On by default.", -60)
         buffPane.watchPets:SetHitRectInsets(0, -80, 0, 0)
         buffPane.modifierWatchers = ResCheck("watcherModifiers", "Use buff bindings", 72,
             "Keep watcher icons and glows visible while holding Shift, Ctrl or Alt. If a missing buff already has a binding, the reminder shows that shortcut and leaves your left-click spell in place. Off by default.", -100)
         buffPane.modifierWatchers:SetHitRectInsets(0, -130, 0, 0)
+        buffPane.buffPets = ResCheck("buffPets", "Buff pets", 244,
+            "Watch pet-compatible buffs such as Thorns on friendly pets. Requires Buff watcher. Player recipient filters apply separately. Off by default.", -100)
+        buffPane.buffPets:SetHitRectInsets(0, -75, 0, 0)
         buffPane.resurrection = ResCheck("resurrectionWatch", "Resurrection watcher", 0,
             "Offer a learned reagent-free resurrection on dead friendly players outside combat. Resurrection takes priority over cures and buffs. On by default. Turning this off also disables combat resurrection watching; manual bindings still work.")
         buffPane.combatRes = ResCheck("combatResurrection", "Combat resurrection", 380,
@@ -829,6 +832,9 @@ OpenBuffs = function()
         function buffPane:Render()
             self.blessings:SetShown(CanShowPaladin())
             self.modifierWatchers:SetChecked(AggeHealBotDB.watcherModifiers)
+            self.buffPets:SetChecked(AggeHealBotDB.buffPets)
+            self.buffPets:SetEnabled(AggeHealBotDB.smartBuffs)
+            self.buffPets:SetAlpha(AggeHealBotDB.smartBuffs and 1 or 0.45)
             self.watchPets:SetChecked(AggeHealBotDB.watchPets)
             self.combatCures:SetChecked(AggeHealBotDB.combatCures)
             self.combatCures:SetEnabled(AggeHealBotDB.cureWatch)

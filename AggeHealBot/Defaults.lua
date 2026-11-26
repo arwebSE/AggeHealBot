@@ -68,7 +68,7 @@ A.presets = {
 }
 
 A.buffs = {
-    DRUID = {{1126, 21849}, {467}},
+    DRUID = {{1126, 21849}, {467, petEligible = true}},
     PRIEST = {{1243, 21562}, {14752, 27681}, {976, 27683}, {588, selfOnly = true}},
 }
 

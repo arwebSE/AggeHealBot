@@ -3026,13 +3026,29 @@ for _, frame in ipairs(pets) do assert(frame.attrs.spell1 == "Regrowth" and (not
 harmful.raidpet3 = {{name = "Pet curse", dispelName = "Curse"}}
 event("UNIT_AURA", "raidpet3")
 assert(CompactRaidFrame61.attrs.spell1 == "Remove Curse")
+local buffPets = AggeHealBotBuffSettings.buffPets
+assert(not buffPets.checked)
+buffPets:SetChecked(true)
+buffPets.scripts.OnClick(buffPets)
+assert(PetFrame.attrs.spell1 == "Thorns" and normalParty.PetFrame.attrs.spell1 == "Thorns",
+    "eligible Thorns takes precedence over healing without offering Mark of the Wild on pets")
+assert(CompactRaidFrame61.attrs.spell1 == "Remove Curse", "pet cures retain their usual priority")
+ns.SetOption("watchPets", false)
+assert(CompactRaidFrame61.attrs.spell1 == "Thorns", "pet buffing works independently from pet cures")
+auras.raidpet3 = {{name = "Thorns", spellId = 467}}
+event("UNIT_AURA", "raidpet3")
+assert(CompactRaidFrame61.attrs.spell1 == "Regrowth", "a pet with Thorns does not get another buff prompt")
+ns.SetOption("smartBuffs", false)
+AggeHealBotBuffSettings:Render()
+assert(PetFrame.attrs.spell1 == "Regrowth" and not buffPets.enabled)
+ns.SetOption("smartBuffs", true)
 ns.SetOption("combatResurrection", true)
 deadPet = true
 event("UNIT_FLAGS", "pet")
 for _, frame in ipairs(pets) do assert(not frame.attrs.macrotext1:find("help,dead", 1, true), "player resurrection must never be offered on pets") end
 deadPet = false
 ns.ResetWatchers()
-assert(AggeHealBotDB.watchPets and PetFrame.attrs.spell1 == "Regrowth")
+assert(AggeHealBotDB.watchPets and not AggeHealBotDB.buffPets and PetFrame.attrs.spell1 == "Regrowth")
 print("PASS: stock/party/compact pet bindings, explicit targeting, hover, default-on pet cure watching and exclusion from normal/combat resurrection")
 end)()
 

@@ -22,7 +22,7 @@ local optionDefaults = {
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
     showTooltip = true, replaceBlizzardTooltip = false,
-    watchPets = true, hovercast = false,
+    watchPets = true, buffPets = false, hovercast = false,
     buffsBeforeCures = false, watcherModifiers = false,
 }
 local function secret(v) return issecretvalue and issecretvalue(v) end
@@ -424,7 +424,7 @@ local function BuffTargetAllowed(unit, group)
     end
     return mode == "class:" .. token
 end
-local function MissingBuff(unit)
+local function MissingBuff(unit, pet)
     if not AggeHealBotDB.smartBuffs or not unit or ReadFlag(UnitExists, unit) ~= true
         or ReadFlag(UnitCanAssist, "player", unit) ~= true or ReadFlag(UnitIsDeadOrGhost, unit) ~= false then return end
     local present, evidence, auras = HelpfulAuras(unit)
@@ -433,7 +433,10 @@ local function MissingBuff(unit)
     local groups = class == "PALADIN" and PaladinBuffGroups(unit) or BuffWatchGroups()
     for _, group in ipairs(groups) do
         local definition = A.buffRanks[group[1]]
-        local allowed = BuffTargetAllowed(unit, group)
+        -- Only explicitly supported spells can be watched on pets. Player
+        -- recipient filters apply to players, independently of Buff pets.
+        local allowed = (pet and group.petEligible and not group.selfOnly)
+            or (not pet and BuffTargetAllowed(unit, group))
         local name = allowed and (Resolve({group[1]}) or (definition and Resolve(definition.ranks)))
         local exists = name and BuffSatisfied(group, definition, LearnedBuffRank(definition, name), auras)
         if name and not exists and not RejectedBuffStillActive(guid, name, evidence) then return name, group[1], evidence end
@@ -993,16 +996,19 @@ Apply = function(frame)
     -- Only plain left click changes; modifier bindings stay fixed.
     local buff, buffID, evidence
     local unit = Unit(frame)
-    local watches = WatchAllowed(unit) and left.action == "spell"
-    frames[frame].canHealFirst = watches and heal ~= nil
+    local isPlayer = ReadFlag(UnitIsPlayer, unit) == true
+    local pet = not isPlayer and (AggeHealBotDB.buffPets or AggeHealBotDB.watchPets) and A.IsPetUnit(unit) or false
+    local watches = left.action == "spell" and (isPlayer or (pet and AggeHealBotDB.watchPets))
+    local watchesBuffs = left.action == "spell" and (isPlayer or (pet and AggeHealBotDB.buffPets))
+    frames[frame].canHealFirst = (watches or watchesBuffs) and heal ~= nil
     frames[frame].healingFirst = frames[frame].canHealFirst and A.NeedsHealing(unit) or false
-    if watches and ReadFlag(UnitIsPlayer, unit) == true and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit) end
+    if watchesBuffs and not frames[frame].healingFirst then buff, buffID, evidence = MissingBuff(unit, pet) end
     frames[frame].unitDead = ReadFlag(UnitIsDeadOrGhost, unit)
     local normalRes, normalResID = ResurrectionSpell(false)
     local combatRes, combatResID = ResurrectionSpell(true)
     if not watches or not AggeHealBotDB.resurrectionWatch then normalRes, combatRes = nil, nil end
     if not AggeHealBotDB.combatResurrection then combatRes = nil end
-    if ReadFlag(UnitIsPlayer, unit) ~= true then normalRes, combatRes = nil, nil end
+    if not isPlayer then normalRes, combatRes = nil, nil end
     local res = ResurrectionCandidate(unit, normalRes or combatRes)
     local cure, cureID, debuff
     if watches and not res then cure, cureID, debuff = CureCandidate(unit) end
@@ -1364,6 +1370,7 @@ function A.ResetWatchers()
     AggeHealBotDB.resurrectionWatch, AggeHealBotDB.combatResurrection = true, false
     AggeHealBotDB.resurrectionRanks = nil
     AggeHealBotDB.watchPets = true
+    AggeHealBotDB.buffPets = optionDefaults.buffPets
     Queue()
 end
 function A.GetResurrectionSpell(inCombat)
