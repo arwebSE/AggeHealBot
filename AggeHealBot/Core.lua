@@ -14,6 +14,8 @@ local rejectedBuffs, pendingBuffAttempt = {}, nil
 local hoveredFrame, hoveredRegion, addonTooltip
 local hoverHooks = {}
 local targetVisibilityDrivers = {}
+local wandController, wandMacroButton, wandFrames, enemyWandBindings = nil, nil, {}, {}
+local wandMacroButtonName = "AggeHealBotWandStart"
 local optionDefaults = {
     smartBuffs = true, cureWatch = true, combatCures = true,
     combatResurrection = false, resurrectionWatch = true, showPaladinDebug = false,
@@ -22,6 +24,7 @@ local optionDefaults = {
     showUnlearned = false,
     showAllRanks = false, showMinimap = true, targetOnCast = false,
     showTooltip = true, replaceBlizzardTooltip = false,
+    stopWanding = false,
     watchPets = true, buffPets = false, hovercast = false,
     buffsBeforeCures = false, watcherModifiers = false,
 }
@@ -514,19 +517,143 @@ local function HealOutOfRange(spell, unit)
     -- can return nil. The explicit-target macro still prevents a target cursor.
     return result == false or result == 0
 end
-local function CastEnding(unit)
-    return "\n/stopspelltarget" .. (AggeHealBotDB.targetOnCast and ("\n/target [@" .. unit .. ",help]") or "")
+local function SpellMacro(clause, unit)
+    local retarget = AggeHealBotDB.targetOnCast and ("\n/target [@" .. unit .. ",help]") or ""
+    return "/cast " .. clause .. "\n/stopspelltarget" .. retarget
 end
-local function CastMacro(spell, combatSpell, explicitUnit)
-    if not spell then return "nil" end
-    local target = explicitUnit or "mouseover"
+local function LivingCastClause(spell, combatSpell, target)
     -- The cursor is on this unit frame. No target/player fallback clause.
-    -- Secure cleanup also works in combat, when addon range checks cannot run.
     if combatSpell and combatSpell ~= spell then
-        return "/cast [combat,@" .. target .. ",help,nodead] " .. combatSpell
-            .. "; [nocombat,@" .. target .. ",help,nodead] " .. spell .. CastEnding(target)
+        return "[combat,@" .. target .. ",help,nodead] " .. combatSpell
+            .. "; [nocombat,@" .. target .. ",help,nodead] " .. spell
     end
-    return "/cast [@" .. target .. ",help,nodead] " .. spell .. CastEnding(target)
+    return "[@" .. target .. ",help,nodead] " .. spell
+end
+local function CastMacro(spell, explicitUnit)
+    local target = explicitUnit or "mouseover"
+    return SpellMacro(LivingCastClause(spell, nil, target), target)
+end
+function A.CanStartWanding()
+    local known = C_SpellBook and C_SpellBook.IsSpellKnown or IsPlayerSpell
+    return AggeHealBotDB.stopWanding and SecureHandlerWrapScript ~= nil and ReadFlag(known, 5019) == true
+end
+local wandClick = [[
+    if not control:GetAttribute("enabled") then return end
+    local enemySurface = self:GetAttribute("ahb-enemy-wand-surface")
+    local action
+    if enemySurface then
+        if down or not self:GetEffectiveAttribute("ahb-enemy-wand", button) then return end
+        action = "start"
+    else
+        if not down then return end
+        action = self:GetEffectiveAttribute("ahb-wand-action", button)
+        if not action then return end
+    end
+    local armed = control:GetAttribute("armed")
+    local canStart = action == "start" and SecureCmdOptionParse("[@target,harm,nodead] start")
+    if enemySurface and not canStart then return end
+    if not armed and not canStart then return end
+    if not armed and not enemySurface then
+        control:SetAttribute("armed", true)
+        return
+    end
+    local suffix = button == "LeftButton" and "1" or button == "RightButton" and "2"
+        or button == "MiddleButton" and "3" or button:match("^Button(%d+)$")
+    if not suffix then return end
+    local prefix = (IsAltKeyDown() and "alt-" or "") .. (IsControlKeyDown() and "ctrl-" or "")
+        .. (IsShiftKeyDown() and "shift-" or "")
+    local previous = newtable()
+    previous.typeKey = prefix .. "type" .. suffix
+    previous.macroKey = prefix .. "macrotext" .. suffix
+    previous.action = self:GetAttribute(previous.typeKey)
+    previous.macro = self:GetAttribute(previous.macroKey)
+    wandClickRestore = wandClickRestore or newtable()
+    wandClickRestore[self] = previous
+    control:SetAttribute("armed", not armed or nil)
+    self:SetAttribute(previous.typeKey, "macro")
+    self:SetAttribute(previous.macroKey, control:GetAttribute(armed and "stop-macro" or "start-macro"))
+    -- The wrapper scrubs tables from the arguments sent to the post-click snippet.
+    return nil, true
+]]
+local restoreWandClick = [[
+    local previous = wandClickRestore and wandClickRestore[self]
+    if not previous then return end
+    wandClickRestore[self] = nil
+    self:SetAttribute(previous.typeKey, previous.action)
+    self:SetAttribute(previous.macroKey, previous.macro)
+]]
+local function WandSpellName()
+    local shoot = SpellName(5019)
+    if not secret(shoot) and type(shoot) == "string" and shoot ~= "" then
+        return shoot
+    end
+end
+local function WandStartMacro()
+    local shoot = WandSpellName()
+    if shoot then return "/cast [@target,harm,nodead] " .. shoot end
+end
+function A.GetWandMacroText()
+    local shoot = WandSpellName()
+    return "#showtooltip" .. (shoot and " " .. shoot or "") .. "\n/click " .. wandMacroButtonName
+end
+local function GetWandController()
+    if not wandController then
+        wandController = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+        wandController:SetAttribute("enabled", true)
+        wandController:SetAttribute("start-macro", WandStartMacro())
+        -- Resetting the hostile target stops repeating Shoot between bolts.
+        wandController:SetAttribute("stop-macro", "/stopmacro [@target,noexists][@target,noharm][@target,dead]\n/cleartarget\n/targetlasttarget")
+    end
+    return wandController
+end
+local function WrapWandClicks(frame)
+    if wandFrames[frame] then return end
+    wandFrames[frame] = true
+    SecureHandlerWrapScript(frame, "OnClick", GetWandController(), wandClick, restoreWandClick)
+end
+local function CreateWandMacroButton()
+    if wandMacroButton then return end
+    local button = CreateFrame("Button", wandMacroButtonName, UIParent, "SecureActionButtonTemplate")
+    -- A /click macro can invoke the native spell action directly. Keep the
+    -- button on the release edge, which /click uses by default.
+    button:RegisterForClicks("LeftButtonUp")
+    button:SetAttribute("useOnKeyDown", false)
+    button:SetAttribute("type", "spell")
+    button:SetAttribute("spell", 5019)
+    button:SetAttribute("unit", "target")
+    button:EnableMouse(false)
+    SecureHandlerWrapScript(button, "OnClick", GetWandController(), [[
+        if down or not control:GetAttribute("enabled") or not SecureCmdOptionParse("[@target,harm,nodead] start") then
+            return false
+        end
+        control:SetAttribute("armed", true)
+    ]])
+    wandMacroButton = button
+end
+function A.ConfigureEnemyWand(frame, enabled)
+    if not frame or not frame.RegisterForClicks or (frame.IsForbidden and frame:IsForbidden()) then return end
+    local previous = enemyWandBindings[frame]
+    local keys = {}
+    if enabled and A.CanStartWanding() then
+        for _, binding in ipairs(bindings) do
+            if binding.action == "wand" then keys[binding.prefix .. "ahb-enemy-wand" .. binding.button] = true end
+        end
+    end
+    if next(keys) then
+        if not previous then
+            WrapWandClicks(frame)
+            frame:SetAttribute("ahb-enemy-wand-surface", true)
+        end
+        for key in pairs(keys) do
+            if not previous or not previous[key] then frame:SetAttribute(key, true) end
+        end
+    elseif previous then
+        frame:SetAttribute("ahb-enemy-wand-surface", nil)
+    end
+    for key in pairs(previous or {}) do
+        if not keys[key] then frame:SetAttribute(key, nil) end
+    end
+    enemyWandBindings[frame] = next(keys) and keys or nil
 end
 local function TargetMacro(frame)
     -- Native UnitFrame click-binding routing can discard type="target" when
@@ -589,7 +716,13 @@ function A.ConfigureHoverAction(button, frame, binding)
     button:SetAttribute("*type*", nil)
     button:SetAttribute("*macrotext*", nil)
     button:SetAttribute("*clickbutton*", nil)
+    if wandFrames[button] then button:SetAttribute("*ahb-wand-action*", nil) end
     UnregisterAttributeDriver(button, "type")
+    local canWand = A.CanStartWanding()
+    if canWand and (action == "wand" or action == "spell" and spell) then
+        WrapWandClicks(button)
+        button:SetAttribute("*ahb-wand-action*", action == "wand" and "start" or "spell")
+    end
     if action == "spell" then
         if not spell then button:SetAttribute("type", "none"); return false end
         local resurrection = false
@@ -597,10 +730,13 @@ function A.ConfigureHoverAction(button, frame, binding)
             for _, id in ipairs(ids) do if id == binding.spellID then resurrection = true end end
         end
         local target = TargetUnit(frame) or "mouseover"
-        local macro = resurrection and ("/cast [@" .. target .. ",help,dead] " .. spell .. CastEnding(target))
-            or CastMacro(spell, nil, TargetUnit(frame))
+        local macro = resurrection and SpellMacro("[@" .. target .. ",help,dead] " .. spell, target)
+            or CastMacro(spell, TargetUnit(frame))
         button:SetAttribute("*macrotext*", macro)
         RegisterAttributeDriver(button, "type", "[combat] macro; " .. (HealOutOfRange(spell, Unit(frame)) and "none" or "macro"))
+    elseif action == "wand" and canWand then
+        button:SetAttribute("type", "macro")
+        button:SetAttribute("*macrotext*", WandStartMacro())
     elseif action == "settings" or action == "togglemenu" then
         button:SetAttribute("type", "click")
         button:SetAttribute("*clickbutton*", action == "settings" and A.settingsButton or MenuButton(frame))
@@ -952,11 +1088,17 @@ Apply = function(frame)
     frame:RegisterForClicks("AnyDown")
     Set(frame, "checkselfcast", false)
     Set(frame, "checkfocuscast", false)
+    local canWand = A.CanStartWanding()
+    if canWand then WrapWandClicks(frame) end
     for _, b in ipairs(bindings) do
         -- All shortcuts, including modifier-click menus, use saved bindings.
         local bindingAction = BindingAction(frame, b)
         local key = b.prefix .. "type" .. b.button
         local plainLeft = b.prefix == "" and b.button == 1
+        if wandFrames[frame] then
+            Set(frame, b.prefix .. "ahb-wand-action" .. b.button,
+                canWand and (bindingAction == "wand" and "start" or bindingAction == "spell" and b.spell and "spell") or nil)
+        end
         if not plainLeft and bindingAction ~= "spell" and frames[frame].bindingDrivers[key] then
             UnregisterAttributeDriver(frame, key)
             frames[frame].bindingDrivers[key] = nil
@@ -978,13 +1120,15 @@ Apply = function(frame)
                     frames[frame].bindingDrivers[key] = expression
                 end
             else
+                if action == "wand" then action = canWand and "macro" or "none" end
                 Set(frame, key, action == "target" and not A.externalFrames[frame] and "macro" or action)
             end
         end
         if not (b.prefix == "" and b.button == 1) then
             Set(frame, b.prefix .. "spell" .. b.button, bindingAction == "spell" and (b.spell or "") or nil)
             local macro = bindingAction == "target" and not A.externalFrames[frame] and TargetMacro(frame)
-                or bindingAction == "spell" and b.spell and CastMacro(b.spell, nil, TargetUnit(frame)) or nil
+                or bindingAction == "wand" and canWand and WandStartMacro()
+                or bindingAction == "spell" and b.spell and CastMacro(b.spell, TargetUnit(frame)) or nil
             Set(frame, b.prefix .. "macrotext" .. b.button, macro)
         end
     end
@@ -1049,23 +1193,22 @@ Apply = function(frame)
     -- Keep the complete macro intact; its own conditions select combat healing.
     local livingSpell = buff or heal
     if res then livingSpell = heal end
-    Set(frame, "macrotext1", livingSpell and CastMacro(livingSpell, heal, TargetUnit(frame)) or nil)
-    if normalRes or combatRes then
-        local target = TargetUnit(frame) or "mouseover"
-        local clauses = {}
-        if combatRes then
-            clauses[#clauses + 1] = "[combat,@" .. target .. ",help,dead,party] " .. combatRes
-            clauses[#clauses + 1] = "[combat,@" .. target .. ",help,dead,raid] " .. combatRes
-        end
-        if res then clauses[#clauses + 1] = "[nocombat,@" .. target .. ",help,dead] " .. res end
-        local base = frame:GetAttribute("macrotext1")
-        if base and base ~= "nil" then clauses[#clauses + 1] = base:match("^/cast (.-)\n") end
-        Set(frame, "macrotext1", #clauses > 0 and ("/cast " .. table.concat(clauses, "; ") .. CastEnding(target)) or nil)
+    local target = TargetUnit(frame) or "mouseover"
+    local clauses = {}
+    if combatRes then
+        clauses[#clauses + 1] = "[combat,@" .. target .. ",help,dead,party] " .. combatRes
+        clauses[#clauses + 1] = "[combat,@" .. target .. ",help,dead,raid] " .. combatRes
     end
+    if res then clauses[#clauses + 1] = "[nocombat,@" .. target .. ",help,dead] " .. res end
+    if livingSpell then clauses[#clauses + 1] = LivingCastClause(livingSpell, heal, target) end
+    Set(frame, "macrotext1", #clauses > 0 and SpellMacro(table.concat(clauses, "; "), target) or nil)
     local action = (left.action == "settings" or left.action == "togglemenu") and "click" or left.action
     if action == "target" then
         action = A.externalFrames[frame] and "target" or "macro"
         Set(frame, "macrotext1", not A.externalFrames[frame] and TargetMacro(frame) or nil)
+    elseif action == "wand" then
+        action = canWand and "macro" or "none"
+        Set(frame, "macrotext1", canWand and WandStartMacro() or nil)
     end
     if action == "spell" then action = heal and "macro" or "none" end
     if combatRes then action = "macro" end
@@ -1167,6 +1310,7 @@ discover = function()
     if A.DiscoverPetFrames then A.DiscoverPetFrames(Register) end
     Register(PlayerFrame)
     RegisterTargetSurface(TargetFrame, "targetButton", "target", "AggeHealBotTargetButton")
+    A.ConfigureEnemyWand(TargetFrame, AggeHealBotDB.targetFrame)
     RegisterTargetSurface(TargetFrameToT or (TargetFrame and TargetFrame.totFrame), "targetOfTargetButton", "targettarget", "AggeHealBotTargetOfTargetButton", "targetOfTargetFrame")
     RegisterTargetSurface(FocusFrame, "focusButton", "focus", "AggeHealBotFocusButton", "focusFrame")
     for i = 1, 5 do
@@ -1225,6 +1369,14 @@ local function ApplyRaidControls()
 end
 refresh = function()
     if not ready or InCombatLockdown() then return end
+    local wandEnabled = A.CanStartWanding()
+    if wandEnabled then CreateWandMacroButton() end
+    if wandController then
+        wandController:SetAttribute("enabled", wandEnabled)
+        if not wandEnabled or ReadFlag(C_Spell and C_Spell.IsAutoRepeatSpell, 5019) == false then
+            wandController:SetAttribute("armed", nil)
+        end
+    end
     ApplyRaidControls()
     if PlayerFrame and frames[PlayerFrame] and not AggeHealBotDB.playerFrame then
         RestoreFrame(PlayerFrame)
@@ -1558,7 +1710,7 @@ A.ResetOptions = function()
 end
 function A.ResetAdvancedOptions()
     for _, key in ipairs({"playerFrame", "targetFrame", "targetOfTargetFrame", "focusFrame",
-        "rightClickMenu", "hidePartyControls", "hideRaidControls", "showPaladinDebug", "replaceBlizzardTooltip"}) do
+        "rightClickMenu", "hidePartyControls", "hideRaidControls", "showPaladinDebug", "replaceBlizzardTooltip", "stopWanding"}) do
         AggeHealBotDB[key] = optionDefaults[key]
     end
     RefreshTooltip()
@@ -1600,11 +1752,14 @@ SlashCmdList.AGGEHEALBOT = function(msg)
     else ShowSettings() end
 end
 local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("STOP_AUTOREPEAT_SPELL")
 for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "UNIT_TARGET", "INSPECT_READY", "UNIT_FACTION", "GROUP_ROSTER_UPDATE", "PLAYER_ROLES_ASSIGNED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "MODIFIER_STATE_CHANGED", "SPELLS_CHANGED", "UNIT_AURA", "UNIT_HEALTH", "UNIT_DISPLAYPOWER", "UNIT_POWER_UPDATE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN", "UNIT_FLAGS", "UNIT_CONNECTION", "INCOMING_RESURRECT_CHANGED", "UNIT_PET", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED"}) do
     eventFrame:RegisterEvent(event)
 end
 eventFrame:SetScript("OnEvent", function(_, event, arg, message, castGUID, spellID)
-    if event == "ADDON_LOADED" and arg == ADDON then
+    if event == "STOP_AUTOREPEAT_SPELL" then
+        if wandController and not InCombatLockdown() then wandController:SetAttribute("armed", nil) end
+    elseif event == "ADDON_LOADED" and arg == ADDON then
         AggeHealBotDB = AggeHealBotDB or {}
         -- Preserve the previous shared opt-out when upgrading saved settings.
         if AggeHealBotDB.targetOfTargetFrame == nil and AggeHealBotDB.targetFrame ~= nil then

@@ -13,6 +13,8 @@ Click-to-heal on Blizzard and supported X-Perl frames in **WoW Forever**.
 
 Type **`/ahb`** or open **Options → AddOns → AggeHealBot** for settings.
 
+To try wand interruption, enable **Stop wanding first** in **Advanced**. Use **Copy wand macro** and press **Ctrl+C**, then paste the text into a new macro in `/macro` and put it on your action bar. You can also assign **Start wanding** under **Actions** in AggeHealBot. After starting Shoot either way, your next AggeHealBot spell click stops the wand. Click again to cast when ready. If you stop Shoot another way during combat, the next spell click can still be used up clearing wand mode.
+
 For **Forever 1.60.1**. Every cast requires a click.
 
 **Auto Self Cast:** Your game-wide preference stays unchanged. Frame clicks use explicit unit targeting. If an older addon version turned Auto Self Cast off, you can re-enable it in WoW's settings.
@@ -60,7 +62,7 @@ The spell picker opens on **Suggested**, combining heals, buffs and utility. **A
 
 Missing-buff priority is **on by default**. It applies only outside combat and only when plain left click is assigned a spell. Every cast still requires a click.
 
-Use the top **Home**, **Watchers** and **Advanced** tabs in `/ahb`. Home contains bindings and general settings. Advanced contains frame support, right-click behavior and separate party/raid control toggles. Its bottom-left Reset advanced settings button resets only those controls, preserving bindings, Home preferences and watcher settings. Watchers shows buffs and cures side by side: enable or disable individual spells, change their order with up/down arrows, and choose **Cures first** or **Buffs first**. Choices save for the current character. **Reset watcher settings** restores the original lists and priorities; **Reset settings** also resets these choices. The default remains cures before buffs, using debuff order until cure priorities are customized. Resurrection stays first. Unlearned spells remain configurable and activate when trained. Paladin blessings opens from Watchers for paladins. Advanced has a default-off Preview Paladin blessings option for testing. Shaman has no automatic buff list; its buffs remain manually bindable.
+Use the top **Home**, **Watchers** and **Advanced** tabs in `/ahb`. Home contains bindings and general settings. Advanced contains frame support, right-click behavior and separate party/raid control toggles. Its bottom-left Reset advanced settings button resets only those controls, preserving bindings, Home preferences and watcher settings. Watchers shows buffs and cures side by side: enable or disable individual spells, change their order with up/down arrows, and choose **Cures first** or **Buffs first**. Choices save for the current character. **Reset watcher settings** restores the original lists and priorities; **Reset settings** also resets these choices. The default remains cures before buffs, using debuff order until cure priorities are customized. Resurrection stays first. Unlearned spells remain configurable and activate when trained. Paladins can open **Choose blessings by class** directly from the **Blessings** section in Watchers. Advanced has a default-off Preview Paladin blessings option for testing. Shaman has no automatic buff list; its buffs remain manually bindable.
 
 - Druid: Mark of the Wild, then Thorns. Gift of the Wild satisfies Mark.
 - Priest: Fortitude, Divine Spirit and Shadow Protection, when learned. Their group versions satisfy the corresponding buff.
@@ -75,7 +77,7 @@ The watcher compares your highest learned single-target buff rank with the activ
 
 If the game rejects an offered buff because a stronger conflicting effect is active, AggeHealBot skips that buff for that player and removes its icon/glow. This also works for conflicts between differently named spells. The next missing buff, or the normal heal, takes over. Suppression is reconsidered when an observed aura disappears or is replaced, or when your spellbook changes. Additions and ordinary refreshes do not immediately reoffer a rejected buff. For conflicts not already recognized, the first click may still be rejected by the game; the addon does not have a general API for predicting every server-side stacking rule.
 
-Target and target-of-target click healing, hover tooltips and player-only watching are **on by default**, with separate Target frame and Target of target toggles in `/ahb` → Advanced. Friendly units use your normal bindings, while enemy frames keep their stock interactions. Player names in the binding tooltip use their class color.
+Target and target-of-target click healing, hover tooltips and player-only watching are **on by default**, with separate Target frame and Target of target toggles in `/ahb` → Advanced. Friendly units use your normal bindings. Enemy frames use stock interactions and support a specifically assigned **Start wanding** action on the target frame. Player names in the binding tooltip use their class color.
 
 **Focus frame** is also on by default, with its own toggle on Advanced. Friendly focus units use the same editable bindings, unit menus and hover details, with casts explicitly directed to focus. Automatic buff, cure and resurrection watching remains players-only. Enemy focus interactions keep their stock behavior.
 

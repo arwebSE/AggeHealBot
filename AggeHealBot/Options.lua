@@ -70,6 +70,50 @@ local function Button(parent, value, width, x, y, fn)
     b:SetScript("OnClick", fn)
     return b
 end
+local function AddWandMacroCopy(parent)
+    local popup = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    popup:SetSize(334, 94)
+    popup:SetFrameLevel(parent:GetFrameLevel() + 8)
+    popup:EnableMouse(true)
+    popup:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12})
+    popup:SetBackdropColor(0.075, 0.065, 0.05, 1)
+    Text(popup, "Press Ctrl+C to copy", 14, -14, "GameFontHighlightSmall")
+
+    local field = CreateFrame("Frame", nil, popup, "BackdropTemplate")
+    field:SetPoint("TOPLEFT", 14, -34)
+    field:SetPoint("BOTTOMRIGHT", -14, 14)
+    field:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 8})
+    field:SetBackdropColor(0.025, 0.022, 0.018, 1)
+    field:SetBackdropBorderColor(0.52, 0.44, 0.31, 1)
+
+    local edit = CreateFrame("EditBox", nil, field)
+    edit:SetAllPoints(field)
+    edit:SetTextInsets(9, 9, 7, 7)
+    edit:SetFontObject(GameFontHighlight)
+    edit:SetJustifyV("TOP")
+    edit:EnableMouse(true)
+    edit:SetAutoFocus(false)
+    edit:SetMultiLine(true)
+    edit:SetScript("OnEscapePressed", function() popup:Hide() end)
+    popup:SetScript("OnHide", function() edit:ClearFocus() end)
+    parent:HookScript("OnHide", function() popup:Hide() end)
+
+    local close = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+    close:SetScript("OnClick", function() popup:Hide() end)
+
+    local copy = Button(parent, "Copy wand macro", 152, 398, -252, function()
+        -- WoW protects direct clipboard writes. Focus and select for Ctrl+C.
+        popup:Show()
+        edit:SetText(A.GetWandMacroText())
+        edit:SetFocus()
+        edit:HighlightText()
+    end)
+    popup:SetPoint("TOPLEFT", copy, "BOTTOMLEFT", 0, -5)
+    popup:Hide()
+    copy.popup, popup.editBox = popup, edit
+    return copy
+end
 local function PriorityArrow(parent, direction, x, y, onClick)
     local button = CreateFrame("Button", nil, parent)
     button:SetSize(28, 28)
@@ -212,6 +256,7 @@ local function Update()
     panel.showTooltip:SetChecked(AggeHealBotDB.showTooltip)
     panel.hovercast:SetChecked(AggeHealBotDB.hovercast)
     panel.replaceTooltip:SetChecked(AggeHealBotDB.replaceBlizzardTooltip)
+    panel.stopWanding:SetChecked(AggeHealBotDB.stopWanding)
     panel.replaceTooltip:SetEnabled(AggeHealBotDB.showTooltip)
     panel.replaceTooltip:SetAlpha(AggeHealBotDB.showTooltip and 1 or 0.45)
     panel.rightClickMenu:SetChecked(not AggeHealBotDB.rightClickMenu)
@@ -448,6 +493,9 @@ OpenPicker = function(button)
     local actionIcons = {target = 132212, assist = 132179, togglemenu = 134331, settings = 136243, none = 132156}
     for _, action in ipairs({"target", "assist", "togglemenu", "settings", "none"}) do
         picker.actions[#picker.actions + 1] = {label = A.actionLabels[action], action = action, category = "actions", icon = actionIcons[action]}
+    end
+    if A.CanStartWanding() then
+        picker.actions[#picker.actions + 1] = {label = A.actionLabels.wand, action = "wand", category = "actions", icon = 132317}
     end
     picker.filter, picker.page = "suggested", 1
     picker.search:SetText("")
@@ -830,9 +878,17 @@ OpenBuffs = function()
             for index = #list + 1, #rows do rows[index]:Hide() end
         end
         function buffPane:Render()
+            local isPaladin = A.GetPlayerClass() == "PALADIN"
             self.blessings:SetShown(CanShowPaladin())
+            self.blessings:SetText(isPaladin and "Choose blessings by class" or "Paladin blessings")
+            self.blessings:SetSize(isPaladin and 205 or 145, 27)
+            self.blessings:ClearAllPoints()
+            self.blessings:SetPoint("TOPLEFT", isPaladin and 0 or 587, isPaladin and -145 or -1)
             self.modifierWatchers:SetChecked(AggeHealBotDB.watcherModifiers)
+            self.modifierWatchers:ClearAllPoints()
+            self.modifierWatchers:SetPoint("TOPLEFT", isPaladin and 102 or 72, -100)
             self.buffPets:SetChecked(AggeHealBotDB.buffPets)
+            self.buffPets:SetShown(not isPaladin)
             self.buffPets:SetEnabled(AggeHealBotDB.smartBuffs)
             self.buffPets:SetAlpha(AggeHealBotDB.smartBuffs and 1 or 0.45)
             self.watchPets:SetChecked(AggeHealBotDB.watchPets)
@@ -853,10 +909,17 @@ OpenBuffs = function()
                 self.resSpells[index]:SetPoint("TOPLEFT", (index - 1) * 380, -resY - 62)
             end
             self.order:GenerateMenu()
-            self.buffHeading:SetText(AggeHealBotDB.smartBuffs and "Buffs" or "Buffs (off)")
+            local buffLabel = isPaladin and "Blessings" or "Buffs"
+            self.buffHeading:SetText(buffLabel .. (AggeHealBotDB.smartBuffs and "" or " (off)"))
             self.cureHeading:SetText(AggeHealBotDB.cureWatch and "Cures" or "Cures (off)")
             self.cureHeading:SetAlpha(AggeHealBotDB.cureWatch and 1 or 0.4)
-            self.empty:SetText(#buffs > 0 and "" or A.GetPlayerClass() == "PALADIN" and "Set class assignments in Paladin blessings." or "This class has no automatic buff-watch list.")
+            self.empty:ClearAllPoints()
+            self.empty:SetPoint("TOPLEFT", 0, isPaladin and -182 or -148)
+            if isPaladin then
+                self.empty:SetText("Choose which blessing to watch for each class.")
+            else
+                self.empty:SetText(#buffs > 0 and "" or "This class has no automatic buff-watch list.")
+            end
             self.resurrection:SetChecked(AggeHealBotDB.resurrectionWatch)
             self.combatRes:SetChecked(AggeHealBotDB.combatResurrection)
             self.combatRes:SetEnabled(AggeHealBotDB.resurrectionWatch)
@@ -1057,6 +1120,9 @@ function A.ShowOptions(host)
             "Use your assigned plain right-click binding instead of the native unit menu on player, target and focus frames. On by default. Turn this off to open the unit menu instead. Party and raid frames always use their assigned bindings; modifier bindings are unchanged.", true, panel.advanced)
         panel.replaceTooltip = Check("replaceBlizzardTooltip", "Replace Blizzard tooltip", 398, -222,
             "Hide the normal unit tooltip while AggeHealBot's tooltip is shown on a supported frame. When Show tooltip is off, the normal tooltip remains available. Requires Show tooltip. Off by default.", false, panel.advanced)
+        panel.stopWanding = Check("stopWanding", "Stop wanding first", 18, -252,
+            "Enable this setting, click Copy wand macro and press Ctrl+C. Open /macro, create a new macro, paste the text and drag it onto your action bar. Bind it to your wand key. Use that macro or the Start wanding action to start Shoot. Your next spell binding stops the wand. Press again to cast. Changes apply after combat. Off by default.", false, panel.advanced)
+        panel.copyWandMacro = AddWandMacroCopy(panel.advanced)
         panel.raidControls = Check("hideRaidControls", "Hide raid controls", 398, -312,
             "Hide Blizzard's group-control side panel and tab while in a raid. Raid unit frames stay visible. On by default.", false, panel.advanced)
         panel.partyControls = Check("hidePartyControls", "Hide party controls", 18, -312,

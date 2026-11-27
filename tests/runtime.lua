@@ -17,7 +17,7 @@ function GetGameMessageInfo(errorID) return errorID == 42 and "SPELL_FAILED_AURA
 function GetCVar(key) return cvars[key] end
 function SetCVar(key, value) assert(not combat, "CVar write during combat"); cvars[key] = value end
 local known = {[8936] = "Regrowth", [5185] = "Healing Touch", [774] = "Rejuvenation", [1126] = "Mark", [467] = "Thorns", [2782] = "Remove Curse", [2893] = "Abolish Poison"}
-local spellNames = {[21849] = "Gift"}
+local spellNames = {[21849] = "Gift", [5019] = "Shoot"}
 for id, name in pairs(known) do spellNames[id] = name end
 function wipe(t) for k in pairs(t) do t[k] = nil end end
 function InCombatLockdown() return combat end
@@ -355,11 +355,12 @@ assert(CompactRaidFrame1.attrs.spell1 == "Mark")
 -- All healing bindings use an explicit target plus secure cursor cleanup.
 for _, suffix in ipairs({"1", "2", "3"}) do
     local macro = CompactRaidFrame1.attrs["macrotext" .. suffix]
-    assert(macro:find("/cast [", 1, true) == 1, "macro retains cast command")
-    assert(macro:sub(-16) == "/stopspelltarget", "every spell clears targeting cursor")
+    assert(macro:find("/cast [", 1, true) == 1 and macro:sub(-16) == "/stopspelltarget",
+        "each spell macro casts and clears the targeting cursor")
 end
 assert(not drivers[CompactRaidFrame1].macrotext1, "macro commands never pass through state-driver parser")
-assert(CompactRaidFrame1.attrs.macrotext1 == "/cast [combat,@mouseover,help,nodead] Regrowth; [nocombat,@mouseover,help,nodead] Mark\n/stopspelltarget", "left macro keeps full command and combat/buff conditions")
+assert(CompactRaidFrame1.attrs.macrotext1 == "/cast [combat,@mouseover,help,nodead] Regrowth; [nocombat,@mouseover,help,nodead] Mark\n/stopspelltarget",
+    "left macro keeps full command and combat/buff conditions")
 ranges.raid1 = false
 CompactRaidFrame1.scripts.PreClick(CompactRaidFrame1)
 assert(CompactRaidFrame1.attrs.type2 == "none", "out-of-range Healing Touch blocked before cast")
@@ -458,7 +459,7 @@ local originalCreateFrame = CreateFrame
 CreateFrame = function(kind, name, parent, template)
     local f = originalCreateFrame(kind, name, parent, template)
     if name then _G[name] = f end
-    for _, method in ipairs({"SetSize", "SetWidth", "SetWordWrap", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetFontObject", "SetMaxLetters", "SetJustifyH", "SetFocus", "ClearFocus"}) do
+    for _, method in ipairs({"SetSize", "SetWidth", "SetWordWrap", "SetPoint", "ClearAllPoints", "SetTextColor", "SetFrameStrata", "SetClampedToScreen", "EnableMouse", "EnableMouseWheel", "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus", "SetFontObject", "SetMaxLetters", "SetJustifyH", "SetJustifyV", "SetFocus", "ClearFocus", "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetMultiLine", "SetTextInsets"}) do
         f[method] = function() end
     end
     function f:SetParent(value) self.parent = value end
@@ -485,6 +486,7 @@ CreateFrame = function(kind, name, parent, template)
     function f:SetPropagateKeyboardInput() error("identifier must never change protected keyboard propagation") end
     function f:SetPropagateMouseClicks() error("identifier must never change protected mouse propagation") end
     function f:SetFocus() self.focused = true end
+    function f:HighlightText() self.highlighted = self.text end
     function f:ClearFocus() self.focused = false end
     function f:IsMouseOver() return self.mouseOver == true end
     function f:SetNormalFontObject(value) self.normalFont = value end
@@ -1599,6 +1601,8 @@ RAID_CLASS_COLORS = {WARRIOR = {r = 0.78, g = 0.61, b = 0.43}}
 ns.ShowOptions()
 assert(AggeHealBotSettings.activePage == "home")
 AggeHealBotSettings.nav.buffs.scripts.OnClick()
+assert(AggeHealBotBuffSettings.buffHeading.text == "Blessings")
+assert(AggeHealBotBuffSettings.blessings.label.text == "Choose blessings by class")
 AggeHealBotBuffSettings.blessings.scripts.OnClick()
 assert(AggeHealBotTools.rows[1].class == "WARRIOR")
 AggeHealBotTools.rows[1].dropdown.menuOptions.might.choose()
@@ -2728,7 +2732,25 @@ ns.SetOption("resurrectionWatch", false)
 ns.SetOption("targetOfTargetFrame", false)
 ns.SetOption("hidePartyControls", false)
 ns.SetOption("showPaladinDebug", true)
+assert(not settings.stopWanding.checked, "wand interruption is opt-in")
+local copy = settings.copyWandMacro
+assert(copy.parent == settings.advanced and not copy.popup:IsShown())
+copy.scripts.OnClick()
+assert(copy.popup:IsShown() and copy.popup.editBox.focused)
+assert(copy.popup.editBox.highlighted == "#showtooltip Shoot\n/click AggeHealBotWandStart")
+copy.popup.editBox.scripts.OnEscapePressed()
+assert(not copy.popup:IsShown() and not copy.popup.editBox.focused)
+local castMacro = PlayerFrame.attrs.macrotext3
+assert(castMacro:find("/target [@mouseover,help]", 1, true))
+combat = true
+settings.stopWanding:SetChecked(true)
+settings.stopWanding.scripts.OnClick(settings.stopWanding)
+assert(PlayerFrame.attrs.macrotext3 == castMacro)
+combat = false
+event("PLAYER_REGEN_ENABLED")
+assert(PlayerFrame.attrs.macrotext3 == castMacro, "the wand setting does not change the underlying cast macro")
 settings.advancedReset.scripts.OnClick()
+assert(not settings.stopWanding.checked and not AggeHealBotDB.stopWanding and PlayerFrame.attrs.macrotext3 == castMacro)
 assert(AggeHealBotDB.targetOfTargetFrame and AggeHealBotDB.hidePartyControls and not AggeHealBotDB.showPaladinDebug)
 assert(not AggeHealBotDB.smartBuffs and not AggeHealBotDB.showMinimap and AggeHealBotDB.targetOnCast
     and not AggeHealBotDB.resurrectionWatch and AggeHealBotDB.bindings == savedBindings)
@@ -3534,4 +3556,124 @@ assert(#ns.GetMouseButtons() == 5 and #ns.GetHoverKeys() == 0)
 ns.UpdateMinimap()
 assert(AggeHealBotDB.minimap.minimapPos == 225, "minimap returns to the fresh-install position")
 print("PASS: Advanced full reset confirmation, combat guard and fresh character defaults")
+end)()
+
+;(function()
+local routed, hostile, alt = {}, true, false
+local handles, environments = {}, {}
+local suffixes = {LeftButton = "1", RightButton = "2", Button5 = "5"}
+local function Prefix() return alt and "alt-" or "" end
+local function Handle(frame)
+    if handles[frame] then return handles[frame] end
+    handles[frame] = {
+        GetAttribute = function(_, key) return frame.attrs[key] end,
+        SetAttribute = function(_, key, value) frame.attrs[key] = value end,
+        GetEffectiveAttribute = function(_, name, button)
+            return frame.attrs[Prefix() .. name .. suffixes[button]] or frame.attrs["*" .. name .. "*"]
+        end,
+    }
+    return handles[frame]
+end
+local oldWrap = SecureHandlerWrapScript
+function SecureHandlerWrapScript(frame, script, owner, before, after)
+    if script ~= "OnClick" then return oldWrap(frame, script, owner, before, after) end
+    assert(not combat and not routed[frame])
+    local env = environments[owner] or setmetatable({}, {__index = _G})
+    environments[owner] = env
+    routed[frame] = {owner = owner, before = assert(load("return function(self, control, button, down) " .. before .. " end", nil, "t", env))(),
+        after = after and assert(load("return function(self, control, message) " .. after .. " end", nil, "t", env))()}
+end
+local function Click(frame, button, down)
+    local route = assert(routed[frame])
+    local self, owner = Handle(frame), Handle(route.owner)
+    local allow, message = route.before(self, owner, button, down ~= false)
+    if allow == false then return false end
+    local key = Prefix() .. "macrotext" .. suffixes[button]
+    local macro = frame.attrs[key] or frame.attrs["*macrotext*"]
+    -- Like Blizzard's wrapper, invoke the post snippet but scrub table arguments.
+    if message then route.after(self, owner, type(message) ~= "table" and message or nil) end
+    return macro or frame.attrs.spell
+end
+function SecureCmdOptionParse(condition)
+    assert(condition == "[@target,harm,nodead] start")
+    return hostile and "start" or nil
+end
+function newtable() return {} end
+function IsAltKeyDown() return alt end
+function IsShiftKeyDown() return false end
+function IsControlKeyDown() return false end
+C_SpellBook.IsSpellKnown = function(id) return id == 5019 end
+assert(not ns.CanStartWanding(), "knowing Shoot must not enable the option")
+ns.SetOption("stopWanding", true)
+assert(ns.CanStartWanding())
+event("GROUP_ROSTER_UPDATE")
+local macroButton = assert(AggeHealBotWandStart)
+local owner = routed[macroButton].owner
+assert(next(AggeHealBotDB.bindings) == nil and macroButton.attrs.type == "spell" and macroButton.attrs.unit == "target",
+    "the action-bar macro needs no AggeHealBot binding and invokes a native spell action")
+combat = true
+assert(Click(macroButton, "LeftButton") == false and not owner.attrs.armed)
+assert(Click(macroButton, "LeftButton", false) == 5019 and owner.attrs.armed)
+event("STOP_AUTOREPEAT_SPELL")
+assert(Click(macroButton, "LeftButton", false) == 5019 and owner.attrs.armed,
+    "a macro press to restart Shoot after movement can still arm the stop in combat")
+assert(Click(PlayerFrame, "LeftButton"):find("/targetlasttarget", 1, true) and not owner.attrs.armed,
+    "a Shoot spell started from the action-bar macro arms the same stop action")
+combat = false
+assert(ns.SaveBinding("", 5, "wand"))
+assert(ns.SaveBinding("alt-", 2, "spell", "Healing Touch"))
+assert(routed[PlayerFrame].owner == owner)
+local start, heal = PlayerFrame.attrs.macrotext5, CompactRaidFrame1.attrs["alt-macrotext2"]
+assert(start == "/cast [@target,harm,nodead] Shoot")
+assert(heal:find("Healing Touch", 1, true))
+local xperl = CreateFrame("Button", "MockXPerlEnemyTarget")
+xperl.frameKey = "target"
+xperl:SetAttribute("unit", "target")
+xperl.nameFrame = CreateFrame("Button", nil, xperl)
+function XPerl_ForEachUnitFrame(visit) visit(xperl) end
+event("GROUP_ROSTER_UPDATE")
+combat = true
+hostile = false
+Click(PlayerFrame, "Button5")
+assert(not owner.attrs.armed, "a start with no enemy must not arm the wand stop")
+hostile = true
+assert(Click(PlayerFrame, "Button5") == start and owner.attrs.armed)
+Click(PlayerFrame, "RightButton", false)
+assert(owner.attrs.armed, "a release edge for a key-down binding must not consume the stop")
+alt = true
+local stop = Click(CompactRaidFrame1, "RightButton")
+assert(stop:find("\n/cleartarget\n/targetlasttarget", 1, true), "the first spell click stops without attempting a heal")
+assert(not owner.attrs.armed and CompactRaidFrame1.attrs["alt-macrotext2"] == heal)
+assert(Click(CompactRaidFrame1, "RightButton") == heal, "the next click must use the saved modifier spell")
+alt = false
+assert(Click(PlayerFrame, "Button5") == start and owner.attrs.armed)
+assert(Click(PlayerFrame, "Button5") == stop and not owner.attrs.armed, "the start binding also stops an armed wand")
+local originalTargetType = TargetFrame.attrs.type5
+assert(Click(TargetFrame, "Button5") == nil and not owner.attrs.armed, "the stock target button only handles the release edge")
+assert(Click(TargetFrame, "Button5", false) == start and owner.attrs.armed, "the wand binding starts Shoot on the hostile target frame")
+assert(TargetFrame.attrs.type5 == originalTargetType and TargetFrame.attrs.macrotext5 == nil, "enemy target attributes must be restored after the wand click")
+assert(Click(TargetFrame, "RightButton", false) == nil and owner.attrs.armed, "other enemy clicks keep their native routing")
+assert(Click(PlayerFrame, "Button5") == stop and not owner.attrs.armed)
+assert(Click(xperl.nameFrame, "Button5", false) == start and owner.attrs.armed, "X-Perl's enemy name button shares the wand action")
+assert(Click(xperl, "Button5", false) == stop and not owner.attrs.armed, "X-Perl's enemy portrait shares the stop action")
+hostile = false
+assert(Click(TargetFrame, "Button5", false) == nil and not owner.attrs.armed, "the enemy hook must ignore a friendly target")
+hostile = true
+Click(TargetFrame, "Button5", false)
+event("STOP_AUTOREPEAT_SPELL")
+assert(owner.attrs.armed, "an external stop may not rewrite secure state during combat")
+alt = true
+assert(Click(CompactRaidFrame1, "RightButton") == stop and Click(CompactRaidFrame1, "RightButton") == heal,
+    "after an external stop during combat, the consumed click must still restore the original heal")
+combat = false
+alt = false
+Click(TargetFrame, "Button5", false)
+event("STOP_AUTOREPEAT_SPELL")
+alt = true
+assert(not owner.attrs.armed and Click(CompactRaidFrame1, "RightButton") == heal,
+    "stopping Shoot outside combat immediately restores normal healing")
+ns.SetOption("stopWanding", false)
+assert(PlayerFrame.attrs.type5 == "none" and not owner.attrs.enabled and not TargetFrame.attrs["ahb-enemy-wand5"])
+assert(Click(macroButton, "LeftButton", false) == false and not owner.attrs.armed)
+print("PASS: secure wand start on friendly and hostile stock/X-Perl frames, stop-only click, and restoration of native and heal bindings")
 end)()

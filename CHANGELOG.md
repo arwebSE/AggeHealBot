@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3 — 2026-11-27
+
+- Add **Stop wanding first** in Advanced, off by default. Start with the **Start wanding** binding or use **Copy wand macro** to set up `/click AggeHealBotWandStart` on your action bar. The next AggeHealBot spell click stops Shoot between bolts. Press again to cast when ready.
+- Make **Choose blessings by class** easier to find in the Paladin Watchers panel.
+
 ## 1.2.2 — 2026-11-26
 
 - Add an opt-in Buff pets setting in Watchers. Thorns is the only buff currently watched on friendly pets.

@@ -48,6 +48,10 @@ function A.DiscoverXPerl(register, restore, requestRefresh)
     A.VisitXPerlFrames(function(visual, kind, option, fixedUnit)
         seen[visual] = true
         local enabled = public(visual.active) and visual.active ~= false and (not option or AggeHealBotDB[option])
+        if kind == "target" then
+            A.ConfigureEnemyWand(visual, enabled)
+            A.ConfigureEnemyWand(visual.nameFrame, enabled)
+        end
         local button = A.xperlButtons[visual]
         if not button and not enabled then return end
         if not button then
@@ -85,6 +89,10 @@ function A.DiscoverXPerl(register, restore, requestRefresh)
     end)
     for visual, button in pairs(A.xperlButtons) do
         if not seen[visual] then
+            if A.externalFrames[button].kind == "target" then
+                A.ConfigureEnemyWand(visual, false)
+                A.ConfigureEnemyWand(visual.nameFrame, false)
+            end
             if visibility[button] ~= "hide" then
                 RegisterStateDriver(button, "visibility", "hide")
                 visibility[button] = "hide"

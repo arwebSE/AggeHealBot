@@ -10,7 +10,7 @@ A.modifiers = {
     {label = "Alt + Ctrl + ", prefix = "alt-ctrl-"},
     {label = "Alt + Ctrl + Shift + ", prefix = "alt-ctrl-shift-"},
 }
-A.actionLabels = {spell = "Spell", target = "Target unit", assist = "Assist unit", togglemenu = "Unit menu", settings = "AggeHealBot settings", none = "Disabled"}
+A.actionLabels = {spell = "Spell", target = "Target unit", assist = "Assist unit", togglemenu = "Unit menu", settings = "AggeHealBot settings", wand = "Start wanding", none = "Disabled"}
 A.spellCategories = {
     heals = {8936, 5185, 774, 18562, 50464, 33763, 408124, 48438, 408120, 740,
         2050, 2054, 2060, 2061, 139, 17, 596, 32546, 401937, 33076, 401859, 34861, 401946, 64843,
